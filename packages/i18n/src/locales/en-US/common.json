@@ -1,0 +1,6 @@
+{
+  "app": {
+    "name": "tabstride",
+    "description": "Drive your logged-in browser from AI agents via the tabstride CLI"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "tabstride",
+  "private": true,
+  "packageManager": "pnpm@10.17.0",
+  "scripts": {
+    "cli:build": "cargo run -p tabstride-protocol --bin dump-schema --locked && pnpm -r build",
+    "ext:build": "pnpm --filter @tabstride/extension build",
+    "ext:build:zip": "pnpm --filter @tabstride/extension zip",
+    "ext:dev": "pnpm --filter @tabstride/extension dev",
+    "ext:test": "pnpm --filter @tabstride/extension test",
+    "lint": "biome check . && stylelint \"**/*.css\"",
+    "format": "biome format --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.14",
+    "stylelint": "^16.0.0",
+    "stylelint-config-standard": "^37.0.0"
+  }
+}

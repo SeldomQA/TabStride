@@ -1,0 +1,29 @@
+# Rust
+target/
+
+# Node
+node_modules/
+dist/
+.output/
+.wxt/
+.web-extension-id
+
+# Logs
+*.log
+
+# macOS
+.DS_Store
+
+# Environment
+.env.local
+.env.*.local
+
+docs/*
+!docs/assets/
+docs/assets/*
+!docs/assets/tabstride-readme-banner.png
+!docs/assets/tabstride-chrome-web-store-screenshot-1280x800.png
+!docs/assets/harnesses/
+
+docs/
+.pnpm-store/
