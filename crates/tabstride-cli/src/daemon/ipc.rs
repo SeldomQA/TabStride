@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use super::abort::AbortRegistry;
 use super::queue::{DEFAULT_TOOL_TIMEOUT, DispatchError};
@@ -195,7 +195,22 @@ pub fn full_handler(status: DaemonStatus, state: Arc<DaemonState>) -> RpcHandler
         let status = status.clone();
         let state = Arc::clone(&state);
         Box::pin(async move {
-            match method {
+            let method_name = method.as_str();
+            let should_log = should_log_request(&method);
+            let mut context = RequestLogContext::from_request(&state, &params);
+            let started_at = Instant::now();
+
+            if should_log {
+                info!(
+                    rpc_id = %rpc_id,
+                    method = method_name,
+                    session = context.session(),
+                    browser = context.browser(),
+                    "request started"
+                );
+            }
+
+            let body = match method {
                 Method::SystemPing => {
                     let result = PingResult { pong: true };
                     ResponseBody::Ok(serde_json::to_value(result).unwrap_or(Value::Null))
@@ -242,18 +257,121 @@ pub fn full_handler(status: DaemonStatus, state: Arc<DaemonState>) -> RpcHandler
                 | Method::ToolEvaluate
                 | Method::ToolWaitForNavigation
                 | Method::ToolRequestHelp => {
-                    handle_tool_dispatch(&state, rpc_id, method, params).await
+                    handle_tool_dispatch(&state, rpc_id.clone(), method, params).await
                 }
-                Method::ToolWaitMs => handle_wait_ms(&state.abort_registry, rpc_id, params).await,
+                Method::ToolWaitMs => {
+                    handle_wait_ms(&state.abort_registry, rpc_id.clone(), params).await
+                }
                 Method::Cancel => handle_cancel(&state, params),
                 other => ResponseBody::Err(RpcError {
                     code: ErrorCode::UnknownMethod,
                     message: format!("method not implemented yet: {other:?}"),
                     data: None,
                 }),
+            };
+
+            if should_log {
+                context.fill_from_response(&body);
+                let duration_ms = started_at.elapsed().as_millis() as u64;
+                match &body {
+                    ResponseBody::Ok(_) => info!(
+                        rpc_id = %rpc_id,
+                        method = method_name,
+                        session = context.session(),
+                        browser = context.browser(),
+                        duration_ms,
+                        outcome = "ok",
+                        "request completed"
+                    ),
+                    ResponseBody::Err(error) => info!(
+                        rpc_id = %rpc_id,
+                        method = method_name,
+                        session = context.session(),
+                        browser = context.browser(),
+                        duration_ms,
+                        outcome = "error",
+                        error_code = error.code.as_str(),
+                        "request completed"
+                    ),
+                }
             }
+
+            body
         })
     })
+}
+
+/// Context safe to emit in request logs. Request payload values are never
+/// logged: they may contain page text, form values, selectors, or scripts.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct RequestLogContext {
+    session_id: Option<String>,
+    browser_id: Option<String>,
+}
+
+impl RequestLogContext {
+    fn from_request(state: &DaemonState, params: &Value) -> Self {
+        let session_id = params
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let requested_browser = params
+            .get("browser_instance_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let session_browser = session_id
+            .as_ref()
+            .and_then(|id| state.sessions.get(&SessionId(id.clone())))
+            .map(|session| session.browser_id.0);
+        Self {
+            session_id,
+            browser_id: requested_browser.or(session_browser),
+        }
+    }
+
+    fn fill_from_response(&mut self, body: &ResponseBody) {
+        let ResponseBody::Ok(value) = body else {
+            return;
+        };
+        if self.session_id.is_none() {
+            self.session_id = value
+                .get("session_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned);
+        }
+        if self.browser_id.is_none() {
+            self.browser_id = value
+                .get("browser_instance_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned);
+        }
+    }
+
+    fn session(&self) -> &str {
+        self.session_id.as_deref().unwrap_or("-")
+    }
+
+    fn browser(&self) -> &str {
+        self.browser_id.as_deref().unwrap_or("-")
+    }
+}
+
+/// Health/status queries are intentionally debug-only noise. A normal CLI
+/// tool invocation performs a status check before its business RPC today;
+/// logging both at INFO would obscure the operation the user cares about.
+fn should_log_request(method: &Method) -> bool {
+    !matches!(
+        method,
+        Method::SystemHandshake
+            | Method::SystemPing
+            | Method::SystemStatus
+            | Method::SessionList
+            | Method::BrowserList
+    )
 }
 
 /// IPC entry point for `tool.*` RPCs (M6+). Looks up the per-session
@@ -1203,6 +1321,51 @@ mod tests {
 
         let err = tool_dispatch_timeout(&params).unwrap_err();
         assert_eq!(err.code, ErrorCode::InvalidParams);
+    }
+
+    #[test]
+    fn request_log_context_keeps_only_safe_identifiers() {
+        let state = DaemonState::new(crate::daemon::DaemonConfig::new(0));
+        let params = serde_json::json!({
+            "session_id": "abcd",
+            "browser_instance_id": "browser-1",
+            "value": "secret form value",
+            "expression": "document.cookie",
+        });
+
+        let context = RequestLogContext::from_request(&state, &params);
+
+        assert_eq!(context.session(), "abcd");
+        assert_eq!(context.browser(), "browser-1");
+        let debug = format!("{context:?}");
+        assert!(!debug.contains("secret form value"));
+        assert!(!debug.contains("document.cookie"));
+    }
+
+    #[test]
+    fn request_log_context_fills_allocated_session_from_response() {
+        let state = DaemonState::new(crate::daemon::DaemonConfig::new(0));
+        let mut context = RequestLogContext::from_request(&state, &serde_json::json!({}));
+        context.fill_from_response(&ResponseBody::Ok(serde_json::json!({
+            "session_id": "wxyz",
+            "browser_instance_id": "browser-2",
+            "agent_window_id": 42,
+        })));
+
+        assert_eq!(context.session(), "wxyz");
+        assert_eq!(context.browser(), "browser-2");
+    }
+
+    #[test]
+    fn request_logging_skips_health_queries_but_keeps_business_calls() {
+        assert!(!should_log_request(&Method::SystemStatus));
+        assert!(!should_log_request(&Method::BrowserList));
+        assert!(!should_log_request(&Method::SessionList));
+        assert!(should_log_request(&Method::SessionStart));
+        assert!(should_log_request(&Method::SessionStop));
+        assert!(should_log_request(&Method::ToolNavigate));
+        assert!(should_log_request(&Method::ToolSnapshot));
+        assert!(should_log_request(&Method::Cancel));
     }
 
     #[tokio::test]

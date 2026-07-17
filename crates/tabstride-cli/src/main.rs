@@ -22,7 +22,7 @@ fn main() -> ExitCode {
     // The daemon installs its own subscriber (with the rolling file
     // appender); CLI tracing would race with it and silently win, so
     // only init the CLI-side stderr subscriber for client commands.
-    if !matches!(cli.command, Command::Daemon(_)) {
+    if !matches!(cli.command, Command::Daemon(_) | Command::Serve(_)) {
         init_cli_tracing(&cli.flags);
     }
     cli::update::maybe_spawn_background_check(&cli.flags, &cli.command);
@@ -41,6 +41,7 @@ fn main() -> ExitCode {
 
 fn dispatch(cli: Cli, format: Format) -> Result<(), CliError> {
     match cli.command {
+        Command::Serve(args) => cli::daemon::serve(args).map_err(CliError::Local),
         Command::Daemon(cmd) => cli::daemon::dispatch(cmd).map_err(CliError::Local),
         Command::Status => {
             let output = if cli.flags.json {

@@ -33,6 +33,27 @@ pub enum ErrorCode {
     NoBrowserConnected,
 }
 
+impl ErrorCode {
+    /// Stable wire name used in structured logs and JSON responses.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ErrorCode::UnknownMethod => "unknown_method",
+            ErrorCode::Unsupported => "unsupported",
+            ErrorCode::InvalidParams => "invalid_params",
+            ErrorCode::NotFound => "not_found",
+            ErrorCode::PermissionDenied => "permission_denied",
+            ErrorCode::Timeout => "timeout",
+            ErrorCode::CdpFailed => "cdp_failed",
+            ErrorCode::ProtocolError => "protocol_error",
+            ErrorCode::Cancelled => "cancelled",
+            ErrorCode::UserAborted => "user_aborted",
+            ErrorCode::VersionTooOld => "version_too_old",
+            ErrorCode::MultipleBrowsersOnline => "multiple_browsers_online",
+            ErrorCode::NoBrowserConnected => "no_browser_connected",
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum DecodeError {
     #[error("ambiguous response frame: expected exactly one of result or error")]
@@ -49,6 +70,7 @@ mod user_aborted_tests {
     fn user_aborted_serialises_as_snake_case() {
         let v = serde_json::to_value(ErrorCode::UserAborted).unwrap();
         assert_eq!(v, serde_json::json!("user_aborted"));
+        assert_eq!(ErrorCode::UserAborted.as_str(), "user_aborted");
     }
 
     #[test]

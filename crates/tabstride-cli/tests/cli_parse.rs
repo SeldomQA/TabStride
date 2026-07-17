@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use tabstride::cli::daemon::{DaemonCmd, parse_duration};
+use tabstride::daemon::DaemonConfig;
 use tabstride::cli::navigate::NavigateCmd;
 use tabstride::{Cli, Command};
 use clap::Parser;
@@ -21,6 +22,31 @@ fn parses_daemon_start_with_defaults() {
     assert!(!args.foreground);
     assert_eq!(args.resolved_port(), 52800);
     assert_eq!(args.resolved_daemon_idle(), Duration::from_secs(600));
+}
+
+#[test]
+fn parses_top_level_serve_with_defaults_and_flags() {
+    let cli = parse(&["tabstride", "serve"]);
+    let Command::Serve(args) = cli.command else {
+        panic!("expected serve command");
+    };
+    assert_eq!(args.resolved_port(), 52800);
+    assert_eq!(args.resolved_session_idle(), Duration::from_secs(300));
+    assert_eq!(DaemonConfig::from(&args).daemon_idle, None);
+
+    let cli = parse(&[
+        "tabstride",
+        "serve",
+        "--port",
+        "52900",
+        "--session-idle",
+        "30s",
+    ]);
+    let Command::Serve(args) = cli.command else {
+        panic!("expected serve command");
+    };
+    assert_eq!(args.resolved_port(), 52900);
+    assert_eq!(args.resolved_session_idle(), Duration::from_secs(30));
 }
 
 #[test]

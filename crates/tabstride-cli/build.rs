@@ -19,10 +19,8 @@ fn main() {
 
     // The repo-root skill may be a symlink to the packaged skill.
     // Avoid copying a file onto itself through the symlink.
-    if let (Ok(src_real), Ok(dst_real)) = (src.canonicalize(), dst.canonicalize()) {
-        if src_real == dst_real {
-            return;
-        }
+    if let (Ok(src_real), Ok(dst_real)) = (src.canonicalize(), dst.canonicalize()) && src_real == dst_real {
+        return;
     }
 
     if let Some(parent) = dst.parent() {

@@ -449,7 +449,7 @@ pub fn maybe_spawn_background_check(flags: &super::GlobalFlags, command: &super:
         || flags.json
         || matches!(
             command,
-            super::Command::Daemon(_) | super::Command::Update(_)
+            super::Command::Daemon(_) | super::Command::Serve(_) | super::Command::Update(_)
         )
     {
         return;

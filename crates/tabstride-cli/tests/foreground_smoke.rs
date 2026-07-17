@@ -65,3 +65,46 @@ fn foreground_daemon_starts_and_stops() {
         "daemon exited with non-success status: {status:?}"
     );
 }
+
+#[test]
+fn serve_starts_and_stops() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("tabstride");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut child = Command::new(tabstride_bin())
+        .args(["serve", "--port", "0"])
+        .env("TABSTRIDE_HOME", &home)
+        .env("RUST_LOG", "info")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn tabstride serve");
+
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        child.try_wait().expect("try_wait").is_none(),
+        "serve should still be running"
+    );
+
+    let pid = child.id() as i32;
+    // SAFETY: sending SIGTERM to our own child.
+    unsafe {
+        let _ = libc::kill(pid, libc::SIGTERM);
+    }
+
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("try_wait after SIGTERM") {
+            break status;
+        }
+        if started.elapsed() > Duration::from_secs(5) {
+            let _ = child.kill();
+            panic!("serve did not exit within 5s of SIGTERM");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(
+        status.success() || status.code() == Some(0),
+        "serve exited with non-success status: {status:?}"
+    );
+}

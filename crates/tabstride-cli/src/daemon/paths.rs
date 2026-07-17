@@ -27,10 +27,10 @@ pub const TABSTRIDE_HOME_ENV: &str = "TABSTRIDE_HOME";
 /// 1. `TABSTRIDE_HOME` env var (any non-empty value); or
 /// 2. `~/.tabstride` (using [`dirs::home_dir`]).
 pub fn tabstride_home() -> Result<PathBuf> {
-    if let Ok(p) = env::var(TABSTRIDE_HOME_ENV) {
-        if !p.is_empty() {
-            return Ok(PathBuf::from(p));
-        }
+    if let Ok(p) = env::var(TABSTRIDE_HOME_ENV)
+        && !p.is_empty()
+    {
+        return Ok(PathBuf::from(p));
     }
     let home = dirs::home_dir().context("could not determine user home directory")?;
     Ok(home.join(".tabstride"))

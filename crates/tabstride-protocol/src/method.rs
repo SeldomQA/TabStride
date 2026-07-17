@@ -78,6 +78,48 @@ pub enum Method {
 }
 
 impl Method {
+    /// Stable wire name used by protocol frames, metrics, and structured logs.
+    ///
+    /// Keep this match exhaustive so adding a method requires choosing its
+    /// externally visible name here as well as in the serde declaration.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Method::SystemHandshake => "system.handshake",
+            Method::SystemPing => "system.ping",
+            Method::SystemStatus => "system.status",
+            Method::SessionStart => "session.start",
+            Method::SessionStop => "session.stop",
+            Method::SessionStopAll => "session.stop_all",
+            Method::SessionList => "session.list",
+            Method::BrowserList => "browser.list",
+            Method::ToolSessionStart => "tool.session_start",
+            Method::ToolSessionStop => "tool.session_stop",
+            Method::ToolTabList => "tool.tab_list",
+            Method::ToolTabCreate => "tool.tab_create",
+            Method::ToolTabClose => "tool.tab_close",
+            Method::ToolTabBorrow => "tool.tab_borrow",
+            Method::ToolTabReturn => "tool.tab_return",
+            Method::ToolTabSelect => "tool.tab_select",
+            Method::ToolNavigate => "tool.navigate",
+            Method::ToolNavigateBack => "tool.navigate_back",
+            Method::ToolNavigateForward => "tool.navigate_forward",
+            Method::ToolReload => "tool.reload",
+            Method::ToolClick => "tool.click",
+            Method::ToolFill => "tool.fill",
+            Method::ToolPress => "tool.press",
+            Method::ToolSelect => "tool.select",
+            Method::ToolSnapshot => "tool.snapshot",
+            Method::ToolGetHtml => "tool.get_html",
+            Method::ToolScreenshot => "tool.screenshot",
+            Method::ToolConsole => "tool.console",
+            Method::ToolEvaluate => "tool.evaluate",
+            Method::ToolWaitForNavigation => "tool.wait_for_navigation",
+            Method::ToolWaitMs => "tool.wait_ms",
+            Method::ToolRequestHelp => "tool.request_help",
+            Method::Cancel => "cancel",
+        }
+    }
+
     /// Whether this RPC may modify browser state.
     ///
     /// Used by the daemon's pending-interrupt machinery: when the
@@ -160,6 +202,24 @@ mod tests {
         let method: Method = serde_json::from_value(json!("cancel")).unwrap();
         assert_eq!(method, Method::Cancel);
         assert_eq!(serde_json::to_value(method).unwrap(), json!("cancel"));
+    }
+
+    #[test]
+    fn wire_names_match_serialized_method_names() {
+        for method in [
+            Method::SystemStatus,
+            Method::SessionStart,
+            Method::SessionStop,
+            Method::ToolNavigate,
+            Method::ToolSnapshot,
+            Method::ToolClick,
+            Method::Cancel,
+        ] {
+            assert_eq!(
+                serde_json::to_value(&method).unwrap(),
+                serde_json::json!(method.as_str())
+            );
+        }
     }
 
     #[test]

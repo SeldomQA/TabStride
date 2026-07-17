@@ -44,6 +44,31 @@ pub struct StartArgs {
     pub daemon_idle: Option<Duration>,
 }
 
+/// Run the TabStride service in the foreground.
+///
+/// Unlike the auto-started background daemon, `serve` stays alive until it
+/// receives Ctrl+C / SIGTERM. It otherwise uses the exact same runtime core.
+#[derive(Debug, Clone, Default, clap::Args)]
+pub struct ServeArgs {
+    /// Override the WebSocket port (default 52800).
+    #[arg(long, value_name = "PORT")]
+    pub port: Option<u16>,
+
+    /// Session idle timeout, e.g. `5m`, `30s`. Default 5 minutes.
+    #[arg(long, value_name = "DURATION", value_parser = parse_duration)]
+    pub session_idle: Option<Duration>,
+}
+
+impl ServeArgs {
+    pub fn resolved_port(&self) -> u16 {
+        self.port.unwrap_or(DEFAULT_WS_PORT)
+    }
+
+    pub fn resolved_session_idle(&self) -> Duration {
+        self.session_idle.unwrap_or(DEFAULT_SESSION_IDLE)
+    }
+}
+
 impl StartArgs {
     pub fn resolved_port(&self) -> u16 {
         self.port.unwrap_or(DEFAULT_WS_PORT)
@@ -89,6 +114,10 @@ pub fn dispatch(cmd: DaemonCmd) -> anyhow::Result<()> {
             daemon::start::run_start(args)
         }
     }
+}
+
+pub fn serve(args: ServeArgs) -> anyhow::Result<()> {
+    daemon::start::run_serve(args)
 }
 
 #[cfg(test)]

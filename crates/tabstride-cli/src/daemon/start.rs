@@ -21,7 +21,7 @@ use anyhow::{Context, Result};
 use tabstride_protocol::{Method, StatusParams, StatusResult};
 use tracing::{debug, info, warn};
 
-use crate::cli::daemon::StartArgs;
+use crate::cli::daemon::{ServeArgs, StartArgs};
 use crate::daemon::{
     browsers::EXTENSION_CONNECT_WAIT, info as daemon_info, ipc, lockfile, paths,
     state::DaemonState, ws,
@@ -36,7 +36,9 @@ pub(crate) const DAEMONIZED_ENV: &str = "TABSTRIDE_DAEMONIZED";
 pub struct DaemonConfig {
     pub ws_port: u16,
     pub session_idle: Duration,
-    pub daemon_idle: Duration,
+    /// Background daemon idle timeout. `None` keeps a foreground service
+    /// alive until it receives a shutdown signal.
+    pub daemon_idle: Option<Duration>,
     /// Skip the Origin allow-list (tests / `--insecure-origin`).
     pub allow_any_origin: bool,
     /// How long `session.start` polls for an extension handshake before
@@ -52,7 +54,7 @@ impl DaemonConfig {
         Self {
             ws_port: port,
             session_idle: Duration::from_secs(60 * 5),
-            daemon_idle: Duration::from_secs(60 * 30),
+            daemon_idle: Some(Duration::from_secs(60 * 30)),
             allow_any_origin: false,
             extension_connect_wait: EXTENSION_CONNECT_WAIT,
         }
@@ -69,11 +71,29 @@ impl From<&StartArgs> for DaemonConfig {
         Self {
             ws_port: args.resolved_port(),
             session_idle: args.resolved_session_idle(),
-            daemon_idle: args.resolved_daemon_idle(),
+            daemon_idle: Some(args.resolved_daemon_idle()),
             allow_any_origin: false,
             extension_connect_wait: EXTENSION_CONNECT_WAIT,
         }
     }
+}
+
+impl From<&ServeArgs> for DaemonConfig {
+    fn from(args: &ServeArgs) -> Self {
+        Self {
+            ws_port: args.resolved_port(),
+            session_idle: args.resolved_session_idle(),
+            daemon_idle: None,
+            allow_any_origin: false,
+            extension_connect_wait: EXTENSION_CONNECT_WAIT,
+        }
+    }
+}
+
+/// `tabstride serve` entrypoint. This is intentionally a thin foreground
+/// wrapper around the same runtime used by `tabstride daemon start`.
+pub fn run_serve(args: ServeArgs) -> Result<()> {
+    run_foreground(DaemonConfig::from(&args))
 }
 
 /// `tabstride daemon start` entrypoint.
@@ -211,6 +231,8 @@ pub fn run_foreground(cfg: DaemonConfig) -> Result<()> {
         );
         daemon_info::write(&info).context("write daemon.json")?;
         info!(
+            version = env!("CARGO_PKG_VERSION"),
+            protocol_version = "1.0",
             pid = info.pid,
             ws_port = info.ws_port,
             sock = %sock_path.display(),
@@ -309,6 +331,9 @@ pub fn run_foreground(cfg: DaemonConfig) -> Result<()> {
             let active_ipc_connections = active_ipc_connections.clone();
             let daemon_idle = cfg.daemon_idle;
             tokio::spawn(async move {
+                let Some(daemon_idle) = daemon_idle else {
+                    return std::future::pending::<Option<()>>().await;
+                };
                 let tick = (daemon_idle / 4).max(Duration::from_millis(250));
                 let mut ticker = tokio::time::interval(tick);
                 ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

@@ -30,7 +30,7 @@ pub mod waits;
 use clap::{Args, Parser, Subcommand};
 
 use crate::cli::console::ConsoleArgs;
-use crate::cli::daemon::DaemonCmd;
+use crate::cli::daemon::{DaemonCmd, ServeArgs};
 use crate::cli::evaluate::EvaluateArgs;
 use crate::cli::get_html::GetHtmlArgs;
 use crate::cli::human_loop::RequestHelpArgs;
@@ -82,6 +82,9 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Run the TabStride service in the foreground until Ctrl+C.
+    Serve(ServeArgs),
+
     /// Manage the local `tabstride` daemon process.
     #[command(subcommand)]
     Daemon(DaemonCmd),
