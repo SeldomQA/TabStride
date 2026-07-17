@@ -1,7 +1,11 @@
-//! `ensure_daemon()` — first-call auto-spawn used by every business
-//! subcommand.
+//! Daemon discovery and auto-spawn helpers.
 //!
-//! Flow (per design §3.1):
+//! Normal business commands trust a live `daemon.json` entry and connect
+//! directly; they do not issue a `system.status` preflight before every real
+//! request. If that direct connection fails, [`recover_daemon`] starts the
+//! daemon and lets the caller retry once.
+//!
+//! Auto-spawn flow (per design §3.1):
 //! 1. Read `daemon.json`. If the recorded pid is alive, return its info.
 //! 2. Otherwise spawn `tabstride daemon start` (the same binary), inheriting
 //!    `TABSTRIDE_HOME` if set, and poll `daemon.json` for a live pid until
@@ -12,10 +16,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
-use tabstride_protocol::{Method, StatusParams, StatusResult};
-
 use crate::daemon::info::{self, DaemonInfo};
+use anyhow::{Context, Result};
 
 /// Maximum time to wait for an auto-spawned daemon to become ready.
 pub const SPAWN_DEADLINE: Duration = Duration::from_millis(3_000);
@@ -23,9 +25,16 @@ pub const SPAWN_DEADLINE: Duration = Duration::from_millis(3_000);
 /// Read `daemon.json` if it's valid; spawn the daemon otherwise. Returns
 /// the connection handle the caller should use.
 pub fn ensure_daemon() -> Result<DaemonInfo> {
-    if let Some(running) = read_verified()? {
+    if let Some(running) = info::read_valid()? {
         return Ok(running);
     }
+    recover_daemon()
+}
+
+/// Start the daemon after a direct IPC connection failed, then return the
+/// endpoint published by the ready daemon. `tabstride daemon start` is
+/// idempotent, so a concurrent CLI racing us to start the service is safe.
+pub fn recover_daemon() -> Result<DaemonInfo> {
     spawn_daemon()?;
     wait_for_ready(SPAWN_DEADLINE)
         .with_context(|| "auto-spawned daemon failed to become ready in time")
@@ -55,7 +64,7 @@ fn spawn_daemon() -> Result<()> {
 fn wait_for_ready(timeout: Duration) -> Result<DaemonInfo> {
     let deadline = Instant::now() + timeout;
     loop {
-        if let Some(info) = read_verified()? {
+        if let Some(info) = info::read_valid()? {
             return Ok(info);
         }
         if Instant::now() >= deadline {
@@ -65,36 +74,6 @@ fn wait_for_ready(timeout: Duration) -> Result<DaemonInfo> {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-}
-
-fn read_verified() -> Result<Option<DaemonInfo>> {
-    let Some(info) = info::read_valid()? else {
-        return Ok(None);
-    };
-    match verify_daemon(&info, Duration::from_millis(500)) {
-        Ok(status) if status.pid == info.pid => Ok(Some(info)),
-        Ok(_) | Err(_) => Ok(None),
-    }
-}
-
-fn verify_daemon(info: &DaemonInfo, timeout: Duration) -> Result<StatusResult> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime for daemon verification")?;
-    rt.block_on(async {
-        let mut client = crate::ipc_client::Client::connect_path(info.sock_path.clone()).await?;
-        let outcome = client
-            .call::<_, StatusResult>(Method::SystemStatus, &StatusParams::default(), timeout)
-            .await?;
-        outcome.map_err(|err| {
-            anyhow::anyhow!(
-                "daemon verification RPC failed: {} ({:?})",
-                err.message,
-                err.code
-            )
-        })
-    })
 }
 
 fn tabstride_executable() -> Result<PathBuf> {
