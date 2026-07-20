@@ -86,7 +86,7 @@ pub enum Command {
     Serve(ServeArgs),
 
     /// Manage the local `tabstride` daemon process.
-    #[command(subcommand)]
+    #[command(subcommand, hide = true)]
     Daemon(DaemonCmd),
 
     /// Show daemon status.

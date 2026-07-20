@@ -78,7 +78,7 @@ impl CliError {
     pub fn exit_code(&self) -> u8 {
         match self.code() {
             Some(code) => exit_code_for(code),
-            None => 2, // local / protocol-level transport failure
+            None => 2, // service / local / protocol-level transport failure
         }
     }
 }
@@ -119,7 +119,7 @@ struct JsonError {
 fn json_error_string(err: &CliError, exit: u8, hint: Option<&'static str>) -> String {
     let body = JsonError {
         code: err.code(),
-        message: err.to_string(),
+        message: display_message(err),
         hint,
         exit_code: exit,
         data: err.data().cloned(),
@@ -169,10 +169,23 @@ fn hint_for(
     render_info
         .and_then(|info| info.hint)
         .or(if matches!(err, CliError::Local(_)) {
-            Some("is the daemon running? try `tabstride daemon start` or `tabstride status`")
+            Some("start it with `tabstride serve`")
         } else {
             None
         })
+}
+
+fn display_message(err: &CliError) -> String {
+    match err {
+        CliError::Local(source)
+            if source
+                .downcast_ref::<super::ensure_daemon::ServiceNotRunning>()
+                .is_some() =>
+        {
+            "TabStride service is not running".to_string()
+        }
+        _ => err.to_string(),
+    }
 }
 
 /// Render an error to stderr (human-readable) or stdout (`--json`),
@@ -221,7 +234,7 @@ pub fn render_with_extras(
         Format::Human => {
             let summary = match render_info {
                 Some(info) => info.summary.to_string(),
-                None => err.to_string(),
+                None => display_message(err),
             };
             let raw = err.to_string();
             let mut out = std::io::stderr();
@@ -383,9 +396,7 @@ mod tests {
     fn json_error_shape_omits_data_and_code_for_local_failures() {
         let local: CliError = anyhow::anyhow!("daemon unreachable").into();
         let exit = local.exit_code();
-        let hint = hint_for(&local, render_info_for(&local).as_ref()).or(Some(
-            "is the daemon running? try `tabstride daemon start` or `tabstride status`",
-        ));
+        let hint = hint_for(&local, render_info_for(&local).as_ref());
         let json = json_error_string(&local, exit, hint);
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.get("code"), Some(&serde_json::Value::Null));
@@ -397,6 +408,10 @@ mod tests {
         assert_eq!(
             parsed.get("message"),
             Some(&serde_json::json!("daemon unreachable"))
+        );
+        assert_eq!(
+            parsed.get("hint"),
+            Some(&serde_json::json!("start it with `tabstride serve`"))
         );
     }
 

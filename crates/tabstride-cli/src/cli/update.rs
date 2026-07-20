@@ -12,7 +12,6 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::cli::daemon::StartArgs;
 use crate::cli::error::{CliError, Format};
 
 pub const DEFAULT_MANIFEST_URL: &str =
@@ -179,9 +178,9 @@ pub struct UpdateArgs {
     #[arg(short = 'y', long)]
     pub yes: bool,
 
-    /// Do not restart the daemon after replacing the CLI binary.
-    #[arg(long = "no-restart-daemon", default_value_t = true, action = clap::ArgAction::SetFalse)]
-    pub restart_daemon: bool,
+    /// Deprecated compatibility flag; updates never restart the service.
+    #[arg(long = "no-restart-daemon", hide = true)]
+    pub no_restart_daemon: bool,
 }
 
 pub fn dispatch(args: UpdateArgs, format: Format) -> Result<(), CliError> {
@@ -241,7 +240,7 @@ fn run(args: UpdateArgs, format: Format) -> Result<()> {
         );
     }
 
-    let action = install_candidate_with_client(&candidate, args.restart_daemon, &client)?;
+    let action = install_candidate_with_client(&candidate, &client)?;
     let action_label = match action {
         InstallAction::Replaced => "replaced",
         InstallAction::Staged => "staged",
@@ -315,7 +314,6 @@ fn fetch_manifest_with_client(
 
 fn install_candidate_with_client(
     candidate: &UpdateCandidate,
-    restart_daemon: bool,
     client: &reqwest::blocking::Client,
 ) -> Result<InstallAction> {
     let expected_sha = candidate.asset.sha256.as_deref().with_context(|| {
@@ -330,18 +328,7 @@ fn install_candidate_with_client(
     let binary = extract_tabstride_binary(&archive, kind)?;
     let target = std::env::current_exe().context("locate current tabstride executable")?;
 
-    let daemon_was_running = restart_daemon && crate::daemon::info::read_valid()?.is_some();
-    if daemon_was_running {
-        crate::daemon::start::run_stop().context("stop tabstride daemon before update")?;
-    }
-
     let action = replace_binary_at_path(&target, &binary)?;
-
-    if daemon_was_running && matches!(action, InstallAction::Replaced) {
-        crate::daemon::start::run_start(StartArgs::default())
-            .context("restart tabstride daemon after update")?;
-    }
-
     Ok(action)
 }
 

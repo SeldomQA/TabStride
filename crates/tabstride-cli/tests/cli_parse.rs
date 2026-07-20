@@ -94,6 +94,15 @@ fn parses_top_level_status_and_doctor() {
 }
 
 #[test]
+fn top_level_help_hides_deprecated_daemon_commands() {
+    let help = Cli::try_parse_from(["tabstride", "--help"])
+        .unwrap_err()
+        .to_string();
+    assert!(help.contains("serve"));
+    assert!(!help.contains("daemon  "));
+}
+
+#[test]
 fn parses_console_command_with_context_safety_flags() {
     let cli = parse(&[
         "tabstride",
@@ -144,7 +153,7 @@ fn parses_update_subcommand_with_flags() {
     };
     assert!(args.check);
     assert!(args.yes);
-    assert!(!args.restart_daemon);
+    assert!(args.no_restart_daemon);
 }
 
 #[test]

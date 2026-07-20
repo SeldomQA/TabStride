@@ -46,8 +46,7 @@ pub struct StartArgs {
 
 /// Run the TabStride service in the foreground.
 ///
-/// Unlike the auto-started background daemon, `serve` stays alive until it
-/// receives Ctrl+C / SIGTERM. It otherwise uses the exact same runtime core.
+/// The service stays alive until it receives Ctrl+C / SIGTERM.
 #[derive(Debug, Clone, Default, clap::Args)]
 pub struct ServeArgs {
     /// Override the WebSocket port (default 52800).
@@ -107,9 +106,20 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
 
 pub fn dispatch(cmd: DaemonCmd) -> anyhow::Result<()> {
     match cmd {
-        DaemonCmd::Start(args) => daemon::start::run_start(args),
-        DaemonCmd::Stop => daemon::start::run_stop(),
+        DaemonCmd::Start(args) => {
+            eprintln!("warning: `tabstride daemon start` is deprecated; use `tabstride serve`");
+            daemon::start::run_start(args)
+        }
+        DaemonCmd::Stop => {
+            eprintln!(
+                "warning: `tabstride daemon stop` is deprecated; stop `tabstride serve` with Ctrl+C"
+            );
+            daemon::start::run_stop()
+        }
         DaemonCmd::Restart(args) => {
+            eprintln!(
+                "warning: `tabstride daemon restart` is deprecated; restart `tabstride serve` explicitly"
+            );
             daemon::start::run_stop().map_err(|e| e.context("restart failed during stop phase"))?;
             daemon::start::run_start(args)
         }

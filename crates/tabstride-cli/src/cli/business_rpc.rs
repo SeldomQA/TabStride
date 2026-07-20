@@ -25,9 +25,8 @@ use anyhow::Context;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tabstride_protocol::{CancelParams, CancelResult, ErrorCode, Method, RpcError, RpcId};
-use tracing::{debug, warn};
+use tracing::debug;
 
-use crate::cli::ensure_daemon::recover_daemon;
 use crate::cli::error::CliError;
 use crate::ipc_client::IpcClient;
 
@@ -75,7 +74,9 @@ where
     R: DeserializeOwned + Send + 'static,
 {
     let rpc_id: RpcId = format!("{}-{}", rpc_id_prefix, random_short_id());
-    let (mut client, sock) = connect_or_start_and_retry(sock).await?;
+    let mut client = IpcClient::connect(&sock)
+        .await
+        .map_err(|error| CliError::Local(error.context("connect to TabStride service")))?;
     let rpc_id_for_call = rpc_id.clone();
     let rpc_id_for_cancel = rpc_id.clone();
 
@@ -111,44 +112,6 @@ where
     };
 
     outcome.map_err(CliError::from_rpc)
-}
-
-/// Connect directly to the published IPC endpoint. Only a connection-stage
-/// failure triggers daemon startup and one retry; once a request may have
-/// reached the daemon we never retry it, because business methods such as
-/// `tool.click` and `tool.fill` are not generally idempotent.
-async fn connect_or_start_and_retry(
-    initial_sock: PathBuf,
-) -> Result<(IpcClient, PathBuf), CliError> {
-    match IpcClient::connect(&initial_sock).await {
-        Ok(client) => Ok((client, initial_sock)),
-        Err(first_error) => {
-            debug!(
-                sock = %initial_sock.display(),
-                error = %first_error,
-                "direct daemon connection failed; starting daemon before retry"
-            );
-            let info = recover_daemon().map_err(|start_error| {
-                CliError::Local(
-                    start_error.context(format!("direct IPC connection failed: {first_error}")),
-                )
-            })?;
-            let retry_sock = info.sock_path;
-            let client = IpcClient::connect(&retry_sock)
-                .await
-                .map_err(|retry_error| {
-                    warn!(
-                        sock = %retry_sock.display(),
-                        error = %retry_error,
-                        "daemon connection retry failed"
-                    );
-                    CliError::Local(retry_error.context(format!(
-                        "connect to daemon after auto-start (initial error: {first_error})"
-                    )))
-                })?;
-            Ok((client, retry_sock))
-        }
-    }
 }
 
 /// Send a `cancel { rpc_id }` frame over a fresh connection so it

@@ -1,11 +1,4 @@
-//! Verify `ensure_daemon` spawns the daemon when none is running.
-//!
-//! We can't call `ensure_daemon` directly from a test process because
-//! `current_exe()` would point to the test binary, not `tabstride`. Instead we
-//! drive the same effect end-to-end via `tabstride status` (which itself calls
-//! into `ensure_daemon` in M3.3) — but for M3.2 we test the helper by
-//! pointing `current_exe` indirection at the actual `tabstride` binary through
-//! a small shim test.
+//! Service lifecycle compatibility and explicit-start behavior.
 
 #![cfg(unix)]
 
@@ -34,7 +27,7 @@ fn wait_for_pid_exit(pid: i32, timeout: Duration) -> bool {
 }
 
 #[test]
-fn ensure_daemon_idempotent_when_already_running() {
+fn deprecated_daemon_start_remains_compatible_and_idempotent() {
     // Use TABSTRIDE_HOME to isolate.
     let tmp = TempDir::new().unwrap();
     let home = tmp.path().join("tabstride");
@@ -48,6 +41,7 @@ fn ensure_daemon_idempotent_when_already_running() {
         .output()
         .unwrap();
     assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("deprecated"));
 
     let info_path = home.join("daemon.json");
     let info: serde_json::Value =
@@ -141,7 +135,7 @@ fn business_command_sends_no_status_preflight() {
 }
 
 #[test]
-fn business_command_auto_spawns_when_daemon_is_missing() {
+fn business_command_requires_explicit_service_start() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path().join("tabstride");
 
@@ -151,18 +145,22 @@ fn business_command_auto_spawns_when_daemon_is_missing() {
         .env("RUST_LOG", "warn")
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
-        "business command failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(2));
+    let error: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(error["message"], "TabStride service is not running");
+    assert_eq!(error["hint"], "start it with `tabstride serve`");
+    assert!(!home.join("daemon.json").exists());
 
-    let daemon_info: DaemonInfo =
-        serde_json::from_slice(&std::fs::read(home.join("daemon.json")).unwrap()).unwrap();
-    let pid = daemon_info.pid as i32;
-    let _ = Command::new(tabstride_bin())
-        .args(["daemon", "stop"])
+    let human = Command::new(tabstride_bin())
+        .args(["wait-ms", "1ms"])
         .env("TABSTRIDE_HOME", &home)
-        .output();
-    assert!(wait_for_pid_exit(pid, Duration::from_secs(5)));
+        .env("RUST_LOG", "warn")
+        .output()
+        .unwrap();
+    assert_eq!(human.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8(human.stderr).unwrap(),
+        "error: TabStride service is not running\nhint: start it with `tabstride serve`\n"
+    );
+    assert!(!home.join("daemon.json").exists());
 }

@@ -40,7 +40,15 @@ fn tabstride_status_json_returns_structured_payload() {
     let home = tmp.path().join("tabstride");
     std::fs::create_dir_all(&home).unwrap();
 
-    // Auto-spawn via `tabstride status` — should bring up the daemon.
+    // Start the service explicitly before querying it.
+    let started = Command::new(tabstride_bin())
+        .args(["daemon", "start", "--port", "0", "--daemon-idle", "60s"])
+        .env("TABSTRIDE_HOME", &home)
+        .env("RUST_LOG", "warn")
+        .output()
+        .expect("start test service");
+    assert!(started.status.success());
+
     let out = Command::new(tabstride_bin())
         .args(["--json", "status"])
         .env("TABSTRIDE_HOME", &home)
@@ -83,8 +91,7 @@ fn tabstride_doctor_runs_without_running_daemon() {
     let home = tmp.path().join("tabstride");
     std::fs::create_dir_all(&home).unwrap();
 
-    // `tabstride doctor` auto-spawns the daemon when none is running; use a short
-    // browser-connect wait so the test doesn't block for 5 s.
+    // Doctor is diagnostic only and must not start the service.
     let out = Command::new(tabstride_bin())
         .args(["doctor"])
         .env("TABSTRIDE_HOME", &home)
@@ -106,18 +113,7 @@ fn tabstride_doctor_runs_without_running_daemon() {
         stdout.contains("extension connected"),
         "doctor should mention extension connected check: {stdout}"
     );
-
-    // Clean up the daemon that was auto-spawned above.
-    if let Ok(bytes) = std::fs::read(home.join("daemon.json"))
-        && let Ok(info) = serde_json::from_slice::<serde_json::Value>(&bytes)
-        && let Some(pid) = info["pid"].as_u64()
-    {
-        let _ = Command::new(tabstride_bin())
-            .args(["daemon", "stop"])
-            .env("TABSTRIDE_HOME", &home)
-            .output();
-        wait_for_pid_exit(pid as i32, Duration::from_secs(5));
-    }
+    assert!(!home.join("daemon.json").exists());
 }
 
 #[test]
@@ -127,8 +123,7 @@ fn tabstride_doctor_json_returns_structured_checks() {
     let home = tmp.path().join("tabstride");
     std::fs::create_dir_all(&home).unwrap();
 
-    // `tabstride doctor` auto-spawns the daemon when none is running; use a short
-    // browser-connect wait so the test doesn't block for 5 s.
+    // Doctor is diagnostic only and must not start the service.
     let out = Command::new(tabstride_bin())
         .args(["--json", "doctor"])
         .env("TABSTRIDE_HOME", &home)
@@ -154,17 +149,7 @@ fn tabstride_doctor_json_returns_structured_checks() {
         "doctor JSON should include extension connected check: {stdout}"
     );
 
-    // Clean up the daemon that was auto-spawned above.
-    if let Ok(bytes) = std::fs::read(home.join("daemon.json"))
-        && let Ok(info) = serde_json::from_slice::<serde_json::Value>(&bytes)
-        && let Some(pid) = info["pid"].as_u64()
-    {
-        let _ = Command::new(tabstride_bin())
-            .args(["daemon", "stop"])
-            .env("TABSTRIDE_HOME", &home)
-            .output();
-        wait_for_pid_exit(pid as i32, Duration::from_secs(5));
-    }
+    assert!(!home.join("daemon.json").exists());
 }
 
 #[test]

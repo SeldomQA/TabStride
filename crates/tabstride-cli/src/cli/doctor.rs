@@ -8,7 +8,6 @@ use console::style;
 use serde::Serialize;
 
 use crate::cli::browser_wait::doctor_browser_connect_wait;
-use crate::cli::ensure_daemon::ensure_daemon;
 use crate::cli::status::{self, Output};
 use crate::daemon::info::{self, DaemonInfo};
 use crate::daemon::paths;
@@ -104,20 +103,10 @@ pub fn run(output: Output) -> Result<Vec<CheckResult>> {
     Ok(checks)
 }
 
-/// Ensure the daemon is reachable and give the browser extension time to
-/// connect before checks run. Returns a single [`DaemonState`] snapshot
-/// for check evaluation.
+/// Inspect the service without starting or repairing it. If it is already
+/// running, give the browser extension time to connect before checks run.
 fn resolve_daemon_state(output: Output) -> DaemonState {
-    let mut state = current_state(Duration::ZERO);
-
-    if matches!(state, DaemonState::Missing | DaemonState::StaleDead(_)) && ensure_daemon().is_err()
-    {
-        return current_state(Duration::ZERO);
-    }
-
-    if matches!(state, DaemonState::Missing | DaemonState::StaleDead(_)) {
-        state = current_state(Duration::ZERO);
-    }
+    let state = current_state(Duration::ZERO);
 
     let wait = if needs_browser_wait(&state) {
         doctor_browser_connect_wait()
@@ -285,7 +274,7 @@ fn check_daemon_running(state: &DaemonState) -> CheckResult {
         DaemonState::Missing => CheckResult::fail(
             name,
             "daemon.json not found",
-            "run `tabstride daemon start` or any `tabstride` command (daemon is auto-spawned)",
+            "start the service with `tabstride serve`",
         ),
         DaemonState::ReadError(err) => CheckResult::fail(
             name,
@@ -295,12 +284,12 @@ fn check_daemon_running(state: &DaemonState) -> CheckResult {
         DaemonState::StaleDead(info) => CheckResult::fail(
             name,
             format!("daemon.json is stale (pid {} does not exist)", info.pid),
-            "run `tabstride daemon start` (or delete ~/.tabstride/daemon.json)",
+            "start the service with `tabstride serve`; stale runtime state will be replaced",
         ),
         DaemonState::IpcUnreachable(info, err) => CheckResult::fail(
             name,
             format!("pid {} is alive but IPC is unreachable: {err}", info.pid),
-            "run `tabstride daemon restart`, then check `tabstride logs`",
+            "stop the existing service process, run `tabstride serve`, then check its visible logs",
         ),
         DaemonState::PidMismatch { info, status } => CheckResult::fail(
             name,
@@ -308,7 +297,7 @@ fn check_daemon_running(state: &DaemonState) -> CheckResult {
                 "daemon.json records pid {} but system.status returned pid {}",
                 info.pid, status.pid
             ),
-            "daemon.json is stale; run `tabstride daemon stop && tabstride status` to reset",
+            "stop the existing service process and restart it with `tabstride serve`",
         ),
     }
 }
@@ -316,7 +305,11 @@ fn check_daemon_running(state: &DaemonState) -> CheckResult {
 fn check_version_compatible(status: Option<&StatusResult>) -> CheckResult {
     let name = "protocol compatible";
     let Some(status) = status else {
-        return CheckResult::fail(name, "daemon status unavailable", "start the daemon first");
+        return CheckResult::fail(
+            name,
+            "daemon status unavailable",
+            "start the service with `tabstride serve` first",
+        );
     };
     let ok = status.protocol_version == PROTOCOL_VERSION;
     if ok {
@@ -354,7 +347,7 @@ fn check_browsers_protocol_compatible(status: Option<&StatusResult>) -> CheckRes
         return CheckResult::fail(
             name,
             "daemon status unavailable",
-            "start the daemon and load the extension first",
+            "start the service with `tabstride serve` and load the extension first",
         );
     };
     if status.browsers.is_empty() {
@@ -404,7 +397,7 @@ fn check_extension_connected(status: Option<&StatusResult>) -> CheckResult {
         return CheckResult::fail(
             name,
             "daemon status unavailable",
-            "start the daemon and load the extension first",
+            "start the service with `tabstride serve` and load the extension first",
         );
     };
     let browsers = status.browsers.len();
