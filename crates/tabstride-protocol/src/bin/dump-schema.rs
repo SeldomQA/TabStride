@@ -3,13 +3,13 @@
 use std::fs;
 use std::path::PathBuf;
 
+use schemars::schema_for;
 use tabstride_protocol::system::{
     BrowserListParams, HandshakeParams, HandshakeResult, PingParams, PingResult, StatusParams,
     StatusResult,
 };
 use tabstride_protocol::tools::*;
 use tabstride_protocol::{CancelParams, CancelResult};
-use schemars::schema_for;
 
 fn write_schema(name: &str, schema: impl serde::Serialize) {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("schema");

@@ -5,14 +5,14 @@
 use std::path::PathBuf;
 
 use anyhow::Context;
+use clap::{Args, Subcommand, ValueEnum};
+use serde::Serialize;
 use tabstride_protocol::Method;
 use tabstride_protocol::tools::{
     TabBorrowParams, TabBorrowResult, TabCloseParams, TabCloseResult, TabCreateParams,
     TabCreateResult, TabInfo, TabListParams, TabListResult, TabReturnParams, TabReturnResult,
     TabScope, TabSelectParams, TabSelectResult,
 };
-use clap::{Args, Subcommand, ValueEnum};
-use serde::Serialize;
 
 use crate::cli::TOOL_IPC_TIMEOUT;
 use crate::cli::ensure_daemon::ensure_daemon;

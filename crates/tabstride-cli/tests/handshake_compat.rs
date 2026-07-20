@@ -4,12 +4,14 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use futures_util::{SinkExt, StreamExt};
+use rand::Rng;
 use tabstride::daemon::{self, DaemonConfig};
 use tabstride::ipc_client::IpcClient;
 use tabstride_protocol::system::{HandshakeParams, HandshakeResult, StatusResult};
-use tabstride_protocol::{BrowserPeerInfo, ErrorCode, Method, RequestFrame, ResponseBody, ResponseFrame};
-use futures_util::{SinkExt, StreamExt};
-use rand::Rng;
+use tabstride_protocol::{
+    BrowserPeerInfo, ErrorCode, Method, RequestFrame, ResponseBody, ResponseFrame,
+};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tokio_tungstenite::tungstenite::http::Request;

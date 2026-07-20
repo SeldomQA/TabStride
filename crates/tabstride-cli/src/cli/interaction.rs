@@ -8,12 +8,12 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
+use clap::{Args, ValueEnum};
 use tabstride_protocol::Method;
 use tabstride_protocol::tools::{
     ClickParams, ClickResult, FillParams, FillResult, KeyModifier, MouseButton, PressParams,
     PressResult, SelectParams, SelectResult,
 };
-use clap::{Args, ValueEnum};
 
 use crate::cli::dialogs::print_dialog_summaries;
 use crate::cli::ensure_daemon::ensure_daemon;

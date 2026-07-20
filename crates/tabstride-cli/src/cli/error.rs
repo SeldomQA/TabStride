@@ -13,8 +13,8 @@ use std::io::Write;
 use std::process::ExitCode;
 
 use anyhow::Error;
-use tabstride_protocol::{ErrorCode, RpcError};
 use serde::Serialize;
+use tabstride_protocol::{ErrorCode, RpcError};
 use thiserror::Error;
 
 use super::render_error;

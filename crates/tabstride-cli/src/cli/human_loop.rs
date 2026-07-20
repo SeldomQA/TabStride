@@ -6,9 +6,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
+use clap::Args;
 use tabstride_protocol::Method;
 use tabstride_protocol::tools::{HelpTarget, RequestHelpParams, RequestHelpResult};
-use clap::Args;
 
 use crate::cli::ensure_daemon::ensure_daemon;
 use crate::cli::error::{CliError, Format};

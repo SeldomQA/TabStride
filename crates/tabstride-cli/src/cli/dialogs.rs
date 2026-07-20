@@ -1,7 +1,7 @@
 //! Human-mode stderr summaries for in-band JavaScript dialog payloads.
 
-use tabstride_protocol::tools::JavaScriptDialogInfo;
 use std::io::{self, Write};
+use tabstride_protocol::tools::JavaScriptDialogInfo;
 
 /// Print a one-line summary per dialog to stderr (human mode only).
 pub fn print_dialog_summaries(dialogs: &[JavaScriptDialogInfo]) {

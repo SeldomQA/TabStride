@@ -4,9 +4,9 @@ use std::io::{self, IsTerminal};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use tabstride_protocol::ErrorCode;
 use clap::Args;
 use serde::Serialize;
+use tabstride_protocol::ErrorCode;
 
 use crate::cli::error::CliError;
 use crate::cli::status::Output;

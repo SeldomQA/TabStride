@@ -7,14 +7,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use futures_util::{SinkExt, StreamExt};
+use rand::Rng;
 use tabstride::cli::doctor;
 use tabstride::cli::status::Output;
 use tabstride::daemon::{self, DaemonConfig};
 use tabstride::ipc_client::IpcClient;
-use tabstride_protocol::system::{BrowserListParams, HandshakeParams, HandshakeResult, StatusParams};
+use tabstride_protocol::system::{
+    BrowserListParams, HandshakeParams, HandshakeResult, StatusParams,
+};
 use tabstride_protocol::{BrowserPeerInfo, Method, RequestFrame, ResponseBody, ResponseFrame};
-use futures_util::{SinkExt, StreamExt};
-use rand::Rng;
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tokio_tungstenite::tungstenite::http::Request;

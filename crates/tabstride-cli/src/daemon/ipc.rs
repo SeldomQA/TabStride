@@ -22,6 +22,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tabstride_protocol::system::{
     BrowserListParams, BrowserStatusEntry, SessionStatusEntry, StatusParams, StatusResult,
     VersionSkewEntry,
@@ -30,9 +33,6 @@ use tabstride_protocol::tools::{ReturnFailure, WaitMsParams, WaitMsResult};
 use tabstride_protocol::{
     CancelParams, CancelResult, ErrorCode, Method, PingResult, ResponseBody, RpcError, RpcId,
 };
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
@@ -1005,8 +1005,8 @@ mod unix {
     use std::sync::Arc;
 
     use anyhow::{Context, Result};
-    use tabstride_protocol::{ErrorCode, Frame, RequestFrame, ResponseBody, RpcError};
     use serde_json::Value;
+    use tabstride_protocol::{ErrorCode, Frame, RequestFrame, ResponseBody, RpcError};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::{UnixListener, UnixStream};
     use tracing::{debug, info, warn};
@@ -1107,14 +1107,16 @@ mod unix {
                     debug!(?other, "ipc client sent non-request frame");
                     continue;
                 }
-                Err(err) => serde_json::to_string(&Frame::Response(tabstride_protocol::ResponseFrame {
-                    id: "0".into(),
-                    body: ResponseBody::Err(RpcError {
-                        code: ErrorCode::ProtocolError,
-                        message: format!("invalid frame: {err}"),
-                        data: None,
-                    }),
-                }))?,
+                Err(err) => {
+                    serde_json::to_string(&Frame::Response(tabstride_protocol::ResponseFrame {
+                        id: "0".into(),
+                        body: ResponseBody::Err(RpcError {
+                            code: ErrorCode::ProtocolError,
+                            message: format!("invalid frame: {err}"),
+                            data: None,
+                        }),
+                    }))?
+                }
             };
 
             write_half.write_all(response.as_bytes()).await?;
@@ -1134,8 +1136,8 @@ mod windows {
     use std::sync::Arc;
 
     use anyhow::{Context, Result};
-    use tabstride_protocol::{ErrorCode, Frame, RequestFrame, ResponseBody, RpcError};
     use serde_json::Value;
+    use tabstride_protocol::{ErrorCode, Frame, RequestFrame, ResponseBody, RpcError};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
     use tracing::{debug, info, warn};
@@ -1254,14 +1256,16 @@ mod windows {
                     debug!(?other, "named-pipe client sent non-request frame");
                     continue;
                 }
-                Err(err) => serde_json::to_string(&Frame::Response(tabstride_protocol::ResponseFrame {
-                    id: "0".into(),
-                    body: ResponseBody::Err(RpcError {
-                        code: ErrorCode::ProtocolError,
-                        message: format!("invalid frame: {err}"),
-                        data: None,
-                    }),
-                }))?,
+                Err(err) => {
+                    serde_json::to_string(&Frame::Response(tabstride_protocol::ResponseFrame {
+                        id: "0".into(),
+                        body: ResponseBody::Err(RpcError {
+                            code: ErrorCode::ProtocolError,
+                            message: format!("invalid frame: {err}"),
+                            data: None,
+                        }),
+                    }))?
+                }
             };
 
             write_half.write_all(response.as_bytes()).await?;

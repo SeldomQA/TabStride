@@ -7,9 +7,9 @@
 use std::path::PathBuf;
 
 use anyhow::Context;
+use clap::Args;
 use tabstride_protocol::Method;
 use tabstride_protocol::tools::{GetHtmlParams, GetHtmlResult};
-use clap::Args;
 
 use crate::cli::TOOL_IPC_TIMEOUT;
 use crate::cli::dialogs::print_dialog_summaries;

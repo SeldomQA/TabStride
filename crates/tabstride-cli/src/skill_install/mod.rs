@@ -206,9 +206,7 @@ pub fn run_interactive_prompt(reports: &[HarnessReport]) -> Result<Vec<HarnessId
 
     eprintln!(
         "\n{}",
-        style(" tabstride · Install Agent Skill")
-            .bold()
-            .yellow()
+        style(" tabstride · Install Agent Skill").bold().yellow()
     );
     eprintln!(
         "{}",

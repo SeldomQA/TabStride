@@ -15,6 +15,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::stream::{SplitSink, SplitStream};
+use futures_util::{SinkExt, StreamExt};
+use rand::Rng;
+use serde::Deserialize;
+use serde_json::json;
 use tabstride::daemon::queue::DispatchError;
 use tabstride::daemon::{self, DaemonConfig};
 use tabstride_protocol::system::{HandshakeParams, HandshakeResult};
@@ -22,11 +27,6 @@ use tabstride_protocol::tools::{SessionStartParams, SessionStartResult};
 use tabstride_protocol::{
     BrowserPeerInfo, ErrorCode, Frame, Method, RequestFrame, ResponseBody, ResponseFrame,
 };
-use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
-use rand::Rng;
-use serde::Deserialize;
-use serde_json::json;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
@@ -222,7 +222,9 @@ struct StartReply {
 }
 
 async fn ipc_session_start(sock: &PathBuf) -> String {
-    let mut ipc = tabstride::ipc_client::IpcClient::connect(sock).await.unwrap();
+    let mut ipc = tabstride::ipc_client::IpcClient::connect(sock)
+        .await
+        .unwrap();
     let r: StartReply = ipc
         .call::<(), _>("qs", Method::SessionStart, None, Duration::from_secs(5))
         .await

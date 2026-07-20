@@ -7,6 +7,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rand::Rng;
+use serde::Deserialize;
 use tabstride::daemon::browsers::{
     BrowserClient, BrowserId, BrowserSink, Pending, next_browser_generation,
 };
@@ -14,8 +16,6 @@ use tabstride::daemon::{self, DaemonConfig};
 use tabstride::ipc_client::IpcClient;
 use tabstride_protocol::system::BrowserStatusEntry;
 use tabstride_protocol::{ErrorCode, Method};
-use rand::Rng;
-use serde::Deserialize;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 

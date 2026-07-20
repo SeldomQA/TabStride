@@ -15,8 +15,10 @@ mod platform {
     use std::time::Duration;
 
     use anyhow::{Context, Result};
-    use tabstride_protocol::{Frame, Method, RequestFrame, ResponseBody, StatusParams, StatusResult};
     use serde::{Serialize, de::DeserializeOwned};
+    use tabstride_protocol::{
+        Frame, Method, RequestFrame, ResponseBody, StatusParams, StatusResult,
+    };
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
     use tokio::time::timeout;
@@ -161,8 +163,10 @@ mod platform {
     use std::time::Duration;
 
     use anyhow::{Context, Result};
-    use tabstride_protocol::{Frame, Method, RequestFrame, ResponseBody, StatusParams, StatusResult};
     use serde::{Serialize, de::DeserializeOwned};
+    use tabstride_protocol::{
+        Frame, Method, RequestFrame, ResponseBody, StatusParams, StatusResult,
+    };
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
     use tokio::time::{sleep, timeout};

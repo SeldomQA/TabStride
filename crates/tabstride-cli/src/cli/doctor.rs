@@ -3,9 +3,9 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use tabstride_protocol::StatusResult;
 use console::style;
 use serde::Serialize;
+use tabstride_protocol::StatusResult;
 
 use crate::cli::browser_wait::doctor_browser_connect_wait;
 use crate::cli::status::{self, Output};

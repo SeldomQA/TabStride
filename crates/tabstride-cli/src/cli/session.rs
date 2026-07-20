@@ -9,11 +9,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
+use clap::{Args, Subcommand};
+use serde::{Deserialize, Serialize};
 use tabstride_protocol::system::{BrowserStatusEntry, SessionStatusEntry};
 use tabstride_protocol::tools::ReturnFailure;
 use tabstride_protocol::{ErrorCode, Method};
-use clap::{Args, Subcommand};
-use serde::{Deserialize, Serialize};
 
 use crate::cli::ensure_daemon::ensure_daemon;
 use crate::cli::error::{self, CliError, Format, RenderExtras};

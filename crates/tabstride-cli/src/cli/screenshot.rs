@@ -7,9 +7,9 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, anyhow};
+use clap::Args;
 use tabstride_protocol::Method;
 use tabstride_protocol::tools::{ScreenshotParams, ScreenshotResult};
-use clap::Args;
 
 use crate::cli::TOOL_IPC_TIMEOUT;
 use crate::cli::dialogs::print_dialog_summaries;
@@ -134,22 +134,13 @@ mod tests {
     #[test]
     fn decode_base64_round_trip() {
         // "tabstride" base64-encoded
-        assert_eq!(
-            decode_base64("dGFic3RyaWRl").unwrap(),
-            b"tabstride"
-        );
+        assert_eq!(decode_base64("dGFic3RyaWRl").unwrap(), b"tabstride");
     }
 
     #[test]
     fn decode_base64_ignores_padding_and_whitespace() {
-        assert_eq!(
-            decode_base64("dGFic3RyaWRlIQ==").unwrap(),
-            b"tabstride!"
-        );
-        assert_eq!(
-            decode_base64("dGFic3RyaWRlIQ==\n").unwrap(),
-            b"tabstride!"
-        );
+        assert_eq!(decode_base64("dGFic3RyaWRlIQ==").unwrap(), b"tabstride!");
+        assert_eq!(decode_base64("dGFic3RyaWRlIQ==\n").unwrap(), b"tabstride!");
     }
 
     #[test]

@@ -11,8 +11,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use tabstride_protocol::{Frame, RpcId};
 use serde::{Deserialize, Serialize};
+use tabstride_protocol::{Frame, RpcId};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 

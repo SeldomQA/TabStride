@@ -342,7 +342,8 @@ pub fn verify_sha256(bytes: &[u8], expected_hex: &str) -> Result<()> {
 }
 
 fn manifest_url() -> String {
-    std::env::var("TABSTRIDE_UPDATE_MANIFEST_URL").unwrap_or_else(|_| DEFAULT_MANIFEST_URL.to_string())
+    std::env::var("TABSTRIDE_UPDATE_MANIFEST_URL")
+        .unwrap_or_else(|_| DEFAULT_MANIFEST_URL.to_string())
 }
 
 pub fn update_hint_for_manifest(
@@ -846,7 +847,9 @@ mod tests {
             header.set_size(binary.len() as u64);
             header.set_mode(0o755);
             header.set_cksum();
-            builder.append_data(&mut header, "tabstride", binary).unwrap();
+            builder
+                .append_data(&mut header, "tabstride", binary)
+                .unwrap();
             builder.finish().unwrap();
         }
 

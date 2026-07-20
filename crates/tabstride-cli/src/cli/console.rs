@@ -3,9 +3,9 @@
 use std::path::PathBuf;
 
 use anyhow::Context;
+use clap::Args;
 use tabstride_protocol::Method;
 use tabstride_protocol::tools::{ConsoleEntry, ConsoleParams, ConsoleResult};
-use clap::Args;
 
 use crate::cli::TOOL_IPC_TIMEOUT;
 use crate::cli::ensure_daemon::ensure_daemon;

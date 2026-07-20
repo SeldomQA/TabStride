@@ -7,11 +7,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
+use clap::Args;
 use tabstride_protocol::Method;
 use tabstride_protocol::tools::{
     WaitForNavigationParams, WaitForNavigationResult, WaitMsParams, WaitMsResult,
 };
-use clap::Args;
 
 use crate::cli::dialogs::print_dialog_summaries;
 use crate::cli::ensure_daemon::ensure_daemon;

@@ -1,8 +1,8 @@
 //! Tests for `tabstride install-skill` parsing and harness helpers.
 
+use clap::Parser;
 use tabstride::skill_install::{HarnessId, interactive_candidates, parse_harness_id};
 use tabstride::{Cli, Command};
-use clap::Parser;
 
 #[test]
 fn parses_install_skill_flags() {

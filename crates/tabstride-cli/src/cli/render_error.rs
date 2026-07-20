@@ -211,7 +211,9 @@ pub fn info_for_error(code: ErrorCode, data: Option<&serde_json::Value>) -> Rend
         },
         (ErrorCode::NotFound, reason::REF_NOT_FOUND) => RenderInfo {
             summary: "snapshot ref was not found for this tab",
-            hint: Some("rerun `tabstride snapshot` for the current tab and use one of the returned refs"),
+            hint: Some(
+                "rerun `tabstride snapshot` for the current tab and use one of the returned refs",
+            ),
             exit_code: base.exit_code,
         },
         (ErrorCode::NotFound, reason::SELECTOR_NOT_FOUND) => RenderInfo {

@@ -2,11 +2,11 @@
 
 use std::time::Duration;
 
-use tabstride::cli::daemon::{DaemonCmd, parse_duration};
-use tabstride::daemon::DaemonConfig;
-use tabstride::cli::navigate::NavigateCmd;
-use tabstride::{Cli, Command};
 use clap::Parser;
+use tabstride::cli::daemon::{DaemonCmd, parse_duration};
+use tabstride::cli::navigate::NavigateCmd;
+use tabstride::daemon::DaemonConfig;
+use tabstride::{Cli, Command};
 
 fn parse(args: &[&str]) -> Cli {
     Cli::try_parse_from(args).expect("clap parse should succeed")
@@ -132,10 +132,19 @@ fn parses_console_command_with_context_safety_flags() {
 
 #[test]
 fn rejects_zero_console_bounds() {
-    assert!(Cli::try_parse_from(["tabstride", "console", "--session", "s1", "--limit", "0"]).is_err());
     assert!(
-        Cli::try_parse_from(["tabstride", "console", "--session", "s1", "--max-text-chars", "0"])
-            .is_err()
+        Cli::try_parse_from(["tabstride", "console", "--session", "s1", "--limit", "0"]).is_err()
+    );
+    assert!(
+        Cli::try_parse_from([
+            "tabstride",
+            "console",
+            "--session",
+            "s1",
+            "--max-text-chars",
+            "0"
+        ])
+        .is_err()
     );
 }
 
@@ -147,7 +156,13 @@ fn parses_install_skill_subcommand() {
 
 #[test]
 fn parses_update_subcommand_with_flags() {
-    let cli = parse(&["tabstride", "update", "--check", "--yes", "--no-restart-daemon"]);
+    let cli = parse(&[
+        "tabstride",
+        "update",
+        "--check",
+        "--yes",
+        "--no-restart-daemon",
+    ]);
     let Command::Update(args) = cli.command else {
         panic!("expected update subcommand");
     };
@@ -179,7 +194,15 @@ fn parses_nested_navigate_back_and_forward() {
 
 #[test]
 fn parses_click_count_alias() {
-    let cli = parse(&["tabstride", "click", "@e1", "--session", "s1", "--count", "2"]);
+    let cli = parse(&[
+        "tabstride",
+        "click",
+        "@e1",
+        "--session",
+        "s1",
+        "--count",
+        "2",
+    ]);
     let Command::Click(args) = cli.command else {
         panic!("expected click command");
     };
@@ -189,6 +212,15 @@ fn parses_click_count_alias() {
 #[test]
 fn rejects_zero_click_count() {
     assert!(
-        Cli::try_parse_from(["tabstride", "click", "@e1", "--session", "s1", "--count", "0"]).is_err()
+        Cli::try_parse_from([
+            "tabstride",
+            "click",
+            "@e1",
+            "--session",
+            "s1",
+            "--count",
+            "0"
+        ])
+        .is_err()
     );
 }

@@ -8,13 +8,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::{SinkExt, StreamExt};
+use rand::Rng;
 use tabstride::daemon::{self, DaemonConfig};
 use tabstride::ipc_client::IpcClient;
 use tabstride_protocol::system::{HandshakeParams, HandshakeResult, StatusResult};
 use tabstride_protocol::tools::{SessionStartParams, SessionStartResult, SessionStopParams};
-use tabstride_protocol::{BrowserPeerInfo, Frame, Method, RequestFrame, ResponseBody, ResponseFrame};
-use futures_util::{SinkExt, StreamExt};
-use rand::Rng;
+use tabstride_protocol::{
+    BrowserPeerInfo, Frame, Method, RequestFrame, ResponseBody, ResponseFrame,
+};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tokio_tungstenite::tungstenite::http::Request;
@@ -383,7 +385,10 @@ async fn session_start_errors_with_multiple_browsers() {
         .await
         .unwrap();
     let err = result.expect_err("expected multiple_browsers_online");
-    assert_eq!(err.code, tabstride_protocol::ErrorCode::MultipleBrowsersOnline);
+    assert_eq!(
+        err.code,
+        tabstride_protocol::ErrorCode::MultipleBrowsersOnline
+    );
     let data = err
         .data
         .as_ref()

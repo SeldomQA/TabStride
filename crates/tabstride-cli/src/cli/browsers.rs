@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
+use serde::Deserialize;
 use tabstride_protocol::Method;
 use tabstride_protocol::system::BrowserListParams;
 use tabstride_protocol::system::BrowserStatusEntry;
-use serde::Deserialize;
 
 use crate::cli::browser_wait::{
     browser_connect_wait, browser_query_ipc_timeout, wait_for_browser_ms,

@@ -8,13 +8,13 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
+use clap::{Args, Subcommand, ValueEnum};
+use serde::Serialize;
 use tabstride_protocol::Method;
 use tabstride_protocol::tools::{
     NavigateBackParams, NavigateBackResult, NavigateForwardParams, NavigateForwardResult,
     NavigateParams, NavigateResult, ReloadParams, ReloadResult, WaitUntil,
 };
-use clap::{Args, Subcommand, ValueEnum};
-use serde::Serialize;
 
 use crate::cli::dialogs::print_dialog_summaries;
 use crate::cli::ensure_daemon::ensure_daemon;
