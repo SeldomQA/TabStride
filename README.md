@@ -130,6 +130,36 @@ Start a new Agent session and write a prompt that needs the browser, for example
 /tabstride open example.com and summarize what is on the page.
 ```
 
+### Run the local service in the foreground
+
+Start the TabStride service explicitly before running browser commands:
+
+```bash
+tabstride serve
+```
+
+This is the single supported service entrypoint. It starts IPC, WebSocket, session management, and
+request processing together, and stops them together when you press <kbd>Ctrl</kbd>+<kbd>C</kbd>.
+Use `tabstride serve --help` to configure the WebSocket port or session idle timeout.
+
+Run business commands from another terminal. If the service is absent, they fail immediately and
+tell you to run `tabstride serve`; they never create a background process. `tabstride status` and
+`tabstride doctor` remain read-only diagnostics and never start the service.
+
+Business requests are logged without their payloads:
+
+```text
+INFO request started   rpc_id=nav-a1b2 method="tool.navigate" session="abcd" browser="5301f701"
+INFO request timing    rpc_id=nav-a1b2 method="tool.navigate" queue_wait_us=81 websocket_us=740 extension_dispatch_us=118420 cdp_us=93470 daemon_runtime_us=119310
+INFO request completed rpc_id=nav-a1b2 method="tool.navigate" session="abcd" browser="5301f701" duration_ms=119 total_runtime_us=119508 outcome="ok"
+```
+
+Health queries are omitted at INFO level. Form values, page content, selectors, and evaluated
+scripts are never included in request logs.
+Run `tabstride -v <business-command>` to also print client-side `cli_startup_us`,
+`daemon_check_us`, `ipc_connect_us`, and `total_runtime_us`. Timings use microseconds so local IPC
+stages below one millisecond remain visible.
+
 ## How It Works
 
 TabStride is a local bridge between your agent harness and your browser.

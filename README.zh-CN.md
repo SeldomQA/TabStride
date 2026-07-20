@@ -16,8 +16,6 @@
 
 需要 Agent 操作你已打开的标签页？必须显式借用该标签，任务结束后归还，其余浏览器窗口不受影响。
 
-https://github.com/user-attachments/assets/db782c92-b1d4-4aae-a255-039675937a90
-
 ## TabStride 的优势
 
 - **复用真实登录态**：Agent 可以操作你已经登录的网站，不需要额外测试账号。
@@ -111,6 +109,34 @@ tabstride install-skill
 ```text
 /tabstride open example.com and summarize what is on the page.
 ```
+
+### 在前台运行本地服务
+
+运行浏览器命令前，先显式启动 TabStride 服务：
+
+```bash
+tabstride serve
+```
+
+这是唯一正式的服务启动入口。IPC、WebSocket、Session 管理和请求处理会一起启动，并在按下
+<kbd>Ctrl</kbd>+<kbd>C</kbd> 后一起停止。WebSocket 端口和 Session 空闲时间可通过
+`tabstride serve --help` 配置。
+
+业务命令在另一个终端中运行。服务未启动时，命令会立即失败并提示运行 `tabstride serve`，不会在后台
+悄悄创建 daemon。`tabstride status` 和 `tabstride doctor` 保留为只读诊断命令，也不会启动服务。
+
+业务请求会记录日志，但不会记录请求内容：
+
+```text
+INFO request started   rpc_id=nav-a1b2 method="tool.navigate" session="abcd" browser="5301f701"
+INFO request timing    rpc_id=nav-a1b2 method="tool.navigate" queue_wait_us=81 websocket_us=740 extension_dispatch_us=118420 cdp_us=93470 daemon_runtime_us=119310
+INFO request completed rpc_id=nav-a1b2 method="tool.navigate" session="abcd" browser="5301f701" duration_ms=119 total_runtime_us=119508 outcome="ok"
+```
+
+INFO 级别不记录健康检查请求；表单值、页面内容、选择器和执行脚本均不会进入请求日志。
+使用 `tabstride -v <业务命令>` 还会在 CLI 侧输出 `cli_startup_us`、
+`daemon_check_us`、`ipc_connect_us` 和 `total_runtime_us`。所有 Timing 使用微秒，
+因此本地 IPC 等不足 1ms 的阶段也能被准确观察。
 
 ## 工作原理
 
