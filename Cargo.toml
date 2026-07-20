@@ -7,9 +7,9 @@ members = [
 default-members = ["crates/tabstride-cli"]
 
 [workspace.package]
-version = "0.1.7"
+version = "0.2.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.97"
 license = "MIT"
 repository = "https://github.com/Tencent/TabStride"
 
@@ -42,7 +42,7 @@ rand = "0.8"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # Workspace crates (version required for `cargo publish` of dependents)
-tabstride-protocol = { version = "0.1.7", path = "crates/tabstride-protocol" }
+tabstride-protocol = { version = "0.2.0", path = "crates/tabstride-protocol" }
 
 [profile.release]
 strip = "symbols"
