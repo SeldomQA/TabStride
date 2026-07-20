@@ -17,7 +17,6 @@ const mockDaemonVersion = "daemon-fixture";
 const baseSnapshot: SnapshotInfo = {
   state: "disconnected",
   instanceId: "",
-  label: "",
   extensionVersion: EXTENSION_VERSION,
   handshake: null,
   lastError: null,
@@ -25,14 +24,12 @@ const baseSnapshot: SnapshotInfo = {
 };
 
 describe("App", () => {
-  const setLabel = vi.fn();
   const setConnectionEnabled = vi.fn();
 
   beforeEach(() => {
     mockUseConnectionState.mockReturnValue({
       snapshot: baseSnapshot,
       statusState: "disconnected",
-      setLabel,
       setConnectionEnabled,
     });
     Object.defineProperty(window, "matchMedia", {
@@ -63,22 +60,12 @@ describe("App", () => {
     expect(screen.queryByText("请先打开 TabStride。")).toBeNull();
   });
 
-  it("uses flex gap for label field spacing", () => {
-    const { container } = render(<App />);
-
-    const labelField = container.querySelector("[data-slot='popup-label-field']");
-    expect(labelField?.className).toContain("flex");
-    expect(labelField?.className).toContain("flex-col");
-    expect(labelField?.className).toContain("gap-3");
-  });
-
   it("shows single-line compact metadata and copies the instance id", async () => {
     mockUseConnectionState.mockReturnValue({
       snapshot: {
         ...baseSnapshot,
         state: "connected",
         instanceId: "03c3e47f",
-        label: "个人 Chrome",
         handshake: {
           server: "bh",
           version: mockDaemonVersion,
@@ -86,7 +73,6 @@ describe("App", () => {
         },
       },
       statusState: "connected",
-      setLabel,
       setConnectionEnabled,
     });
 
@@ -125,7 +111,6 @@ describe("App", () => {
     mockUseConnectionState.mockReturnValue({
       snapshot: { ...baseSnapshot, connectionEnabled: false },
       statusState: "disabled",
-      setLabel,
       setConnectionEnabled,
     });
 

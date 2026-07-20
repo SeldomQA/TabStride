@@ -30,7 +30,6 @@ export function resolvePopupStatusState(
 const FALLBACK_SNAPSHOT: SnapshotInfo = {
   state: "disconnected",
   instanceId: "",
-  label: "",
   extensionVersion: "",
   handshake: null,
   lastError: null,
@@ -40,8 +39,7 @@ const FALLBACK_SNAPSHOT: SnapshotInfo = {
 /**
  * Live snapshot of the background's `ConnectionController` for popup UI.
  *
- * Posts `set_label` mutations back to the background; the incoming
- * snapshot stream reflects the canonical state. The `set_port` channel
+ * The incoming snapshot stream reflects the canonical state. The `set_port` channel
  * is defined by the popup-bridge but is not currently routed to the
  * background — wiring it requires `ConnectionController` to swap its
  * Transport URL and persist the chosen port. Tracked for a follow-up
@@ -51,7 +49,6 @@ const FALLBACK_SNAPSHOT: SnapshotInfo = {
 export function useConnectionState(): {
   snapshot: SnapshotInfo;
   statusState: PopupStatusState;
-  setLabel: (value: string) => void;
   setConnectionEnabled: (value: boolean) => void;
 } {
   const [snapshot, setSnapshot] = useState<SnapshotInfo>(FALLBACK_SNAPSHOT);
@@ -97,7 +94,6 @@ export function useConnectionState(): {
   return {
     snapshot,
     statusState,
-    setLabel: (value: string) => post({ kind: "set_label", value }),
     setConnectionEnabled: (value: boolean) => post({ kind: "set_connection_enabled", value }),
   };
 }

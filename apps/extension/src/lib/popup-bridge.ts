@@ -3,7 +3,7 @@ import type { SnapshotInfo } from "./connection-controller";
 /**
  * Wire protocol for `chrome.runtime.connect({ name: "popup" })`:
  *  - Background pushes `{ kind: "snapshot", data: SnapshotInfo }`.
- *  - Popup sends `{ kind: "set_label" }`, `{ kind: "set_connection_enabled" }`, etc.
+ *  - Popup sends `{ kind: "set_connection_enabled" }` and future settings.
  *
  * NOTE(review M4/M5 C2): the `set_port` variant is defined as a
  * placeholder so the future custom-port UI does not have to re-design
@@ -16,7 +16,6 @@ import type { SnapshotInfo } from "./connection-controller";
 export const POPUP_PORT_NAME = "popup";
 
 export type PopupOutbound =
-  | { kind: "set_label"; value: string }
   | { kind: "set_port"; value: number }
   | { kind: "set_connection_enabled"; value: boolean };
 

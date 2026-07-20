@@ -6,7 +6,6 @@ import { __testing__, ConnectionController } from "../connection-controller";
 
 vi.mock("../instance-id", () => ({
   getOrCreateInstanceId: vi.fn(async () => "a1b2c3d4"),
-  getLabel: vi.fn(async () => "test-label"),
 }));
 
 const { computeConnectedState } = __testing__;

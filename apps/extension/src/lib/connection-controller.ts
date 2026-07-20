@@ -6,13 +6,12 @@ import {
 } from "../transport/handshake";
 import type { Transport } from "../transport/transport";
 import type { ConnectionState, HandshakeResult } from "../transport/types";
-import { getLabel, getOrCreateInstanceId } from "./instance-id";
+import { getOrCreateInstanceId } from "./instance-id";
 import { compareProtocol, parseProtocolMajor } from "./semver";
 
 export interface SnapshotInfo {
   state: ConnectionState;
   instanceId: string;
-  label: string;
   extensionVersion: string;
   handshake: HandshakeResult | null;
   lastError: string | null;
@@ -32,7 +31,6 @@ export class ConnectionController {
   private currentState: ConnectionState = "disconnected";
   private handshake: HandshakeResult | null = null;
   private instanceId = "";
-  private label = "";
   private lastError: string | null = null;
   private connectionEnabled = true;
   private listeners = new Set<Listener>();
@@ -56,7 +54,6 @@ export class ConnectionController {
     return {
       state: this.currentState,
       instanceId: this.instanceId,
-      label: this.label,
       extensionVersion: EXTENSION_VERSION,
       handshake: this.handshake,
       lastError: this.lastError,
@@ -72,7 +69,6 @@ export class ConnectionController {
     this.transport = transport;
     this.connectionEnabled = connectionEnabled;
     this.instanceId = await getOrCreateInstanceId();
-    this.label = await getLabel();
 
     transport.onConnectionStateChange((s) => {
       if (!this.connectionEnabled) return;
@@ -121,11 +117,6 @@ export class ConnectionController {
     }
   }
 
-  async refreshLabel(): Promise<void> {
-    this.label = await getLabel();
-    this.fire();
-  }
-
   private async runHandshake(browser: { name: string; version: string }): Promise<void> {
     if (!this.transport) return;
     if (!this.connectionEnabled) return;
@@ -136,7 +127,6 @@ export class ConnectionController {
       const outcome = await performHandshake(this.transport, {
         instanceId: this.instanceId,
         browser,
-        label: this.label,
       });
       this.handshake = outcome.result;
       const verdict = computeConnectedState(outcome.result);

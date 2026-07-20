@@ -4,7 +4,6 @@ import { ConnectionController } from "@/lib/connection-controller";
 import {
   getConnectionEnabled,
   setConnectionEnabled as persistConnectionEnabled,
-  setLabel,
 } from "@/lib/instance-id";
 import { startKeepalive } from "@/lib/keepalive";
 import {
@@ -156,9 +155,7 @@ export default defineBackground(() => {
     connection.onMessage.addListener((raw: unknown) => {
       const msg = raw as PopupOutbound;
       if (msg && typeof msg === "object" && "kind" in msg) {
-        if (msg.kind === "set_label") {
-          void setLabel(msg.value).then(() => controller.refreshLabel());
-        } else if (msg.kind === "set_port") {
+        if (msg.kind === "set_port") {
           // Placeholder for the future custom-port UI; warn loudly so
           // any reintroduced popup control is caught instead of
           // silently doing nothing (review M4/M5 C2).

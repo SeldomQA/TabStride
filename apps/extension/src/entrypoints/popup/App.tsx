@@ -1,7 +1,7 @@
 import { RiCheckLine, RiFileCopyLine } from "@remixicon/react";
 import { useTranslation } from "@tabstride/i18n/react";
-import { Badge, Button, cn, Input, Label } from "@tabstride/ui";
-import { type ChangeEvent, useEffect, useState } from "react";
+import { Badge, Button, cn } from "@tabstride/ui";
+import { useEffect, useState } from "react";
 import { PROTOCOL_VERSION } from "@/transport/handshake";
 import { ConnectionStatusIndicator } from "./connection-status-indicator";
 import { type PopupStatusState, useConnectionState } from "./use-connection-state";
@@ -29,8 +29,7 @@ function getLogoSrc() {
 
 export function App() {
   const { t } = useTranslation("extension");
-  const { snapshot, statusState, setLabel, setConnectionEnabled } = useConnectionState();
-  const [labelDraft, setLabelDraft] = useState(snapshot.label);
+  const { snapshot, statusState, setConnectionEnabled } = useConnectionState();
   const [copiedInstanceId, setCopiedInstanceId] = useState(false);
 
   useEffect(() => {
@@ -45,16 +44,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    setLabelDraft(snapshot.label);
-  }, [snapshot.label]);
-
-  useEffect(() => {
     setCopiedInstanceId(false);
   }, [snapshot.instanceId]);
-
-  const onLabelBlur = () => {
-    if (labelDraft !== snapshot.label) setLabel(labelDraft);
-  };
 
   const isSkewed = statusState === "version_skew";
   const daemonVersion = snapshot.handshake?.version ?? "—";
@@ -141,22 +132,6 @@ export function App() {
           {snapshot.lastError}
         </div>
       )}
-
-      <div className="flex flex-col gap-3" data-slot="popup-label-field">
-        <Label htmlFor="bh-label" className="block text-xs text-muted-foreground">
-          {t("popup.labelTitle")}
-        </Label>
-        <Input
-          id="bh-label"
-          type="text"
-          value={labelDraft}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => setLabelDraft(event.target.value)}
-          onBlur={onLabelBlur}
-          placeholder={t("popup.labelPlaceholder")}
-          className="mt-0 h-8 text-sm"
-          data-slot="popup-label-input"
-        />
-      </div>
 
       <section
         className="flex min-w-0 items-center justify-between gap-2 border-t border-border/70 pt-2 text-[10px] leading-tight text-muted-foreground"

@@ -83,7 +83,6 @@ describe("performHandshake", () => {
     const outcome = await performHandshake(transport, {
       instanceId: "abcdef01-2345-4678-89ab-cdef01234567",
       browser: { name: "chrome", version: "131.0" },
-      label: "Personal Chrome",
       rpcId: "hs-test",
     });
 
@@ -96,7 +95,7 @@ describe("performHandshake", () => {
         protocol_version: PROTOCOL_VERSION,
         instance_id: "abcdef01-2345-4678-89ab-cdef01234567",
         browser: { name: "chrome", version: "131.0" },
-        label: "Personal Chrome",
+        label: "",
         min_compatible_peer: MIN_COMPATIBLE_PEER,
         min_compatible_protocol: MIN_COMPATIBLE_PROTOCOL,
       },
@@ -118,7 +117,6 @@ describe("performHandshake", () => {
     const outcome = await performHandshake(transport, {
       instanceId: "x",
       browser: { name: "chrome", version: "131" },
-      label: "",
       rpcId: "hs-legacy",
     });
     expect(outcome.result.protocol_version).toBe("1.0");
@@ -140,7 +138,6 @@ describe("performHandshake", () => {
     const outcome = await performHandshake(transport, {
       instanceId: "x",
       browser: { name: "chrome", version: "131" },
-      label: "",
       rpcId: "hs-no-legacy-peer",
     });
 
@@ -157,7 +154,6 @@ describe("performHandshake", () => {
       performHandshake(transport, {
         instanceId: "x",
         browser: { name: "chrome", version: "131" },
-        label: "",
         rpcId: "hs-err",
       }),
     ).rejects.toThrow(/version_too_old/);
@@ -168,7 +164,6 @@ describe("performHandshake", () => {
     const pending = performHandshake(transport, {
       instanceId: "x",
       browser: { name: "chrome", version: "131" },
-      label: "",
       rpcId: "hs-target",
     });
 

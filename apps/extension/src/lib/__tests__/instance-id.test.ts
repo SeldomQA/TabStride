@@ -1,11 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   getConnectionEnabled,
-  getLabel,
   getOrCreateInstanceId,
   STORAGE_KEYS,
   setConnectionEnabled,
-  setLabel,
 } from "../instance-id";
 
 function fakeStorage(initial: Record<string, unknown> = {}) {
@@ -58,18 +56,6 @@ describe("instance-id", () => {
     const id = await getOrCreateInstanceId(backend);
     expect(id).toMatch(/^[0-9a-f]{8}$/);
     expect(store[STORAGE_KEYS.INSTANCE_ID]).toBe(id);
-  });
-
-  it("getLabel returns empty string when label is unset", async () => {
-    const { backend } = fakeStorage();
-    expect(await getLabel(backend)).toBe("");
-  });
-
-  it("setLabel persists the value retrievable by getLabel", async () => {
-    const { backend, store } = fakeStorage();
-    await setLabel("Personal Chrome", backend);
-    expect(store[STORAGE_KEYS.LABEL]).toBe("Personal Chrome");
-    expect(await getLabel(backend)).toBe("Personal Chrome");
   });
 
   it("getConnectionEnabled returns true when storage is empty", async () => {

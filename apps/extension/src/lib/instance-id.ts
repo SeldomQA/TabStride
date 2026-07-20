@@ -1,5 +1,4 @@
 const STORAGE_KEY = "tabstride_instance_id";
-const LABEL_STORAGE_KEY = "bh_label";
 const CONNECTION_ENABLED_KEY = "bh_connection_enabled";
 
 export interface StorageBackend {
@@ -76,19 +75,6 @@ export async function getOrCreateInstanceId(
   return fresh;
 }
 
-export async function getLabel(storage: StorageBackend = defaultStorage()): Promise<string> {
-  const items = await storage.get(LABEL_STORAGE_KEY);
-  const raw = items[LABEL_STORAGE_KEY];
-  return typeof raw === "string" ? raw : "";
-}
-
-export async function setLabel(
-  label: string,
-  storage: StorageBackend = defaultStorage(),
-): Promise<void> {
-  await storage.set({ [LABEL_STORAGE_KEY]: label });
-}
-
 /** Defaults to enabled when unset or non-boolean. */
 export async function getConnectionEnabled(
   storage: StorageBackend = defaultStorage(),
@@ -107,6 +93,5 @@ export async function setConnectionEnabled(
 
 export const STORAGE_KEYS = {
   INSTANCE_ID: STORAGE_KEY,
-  LABEL: LABEL_STORAGE_KEY,
   CONNECTION_ENABLED: CONNECTION_ENABLED_KEY,
 } as const;

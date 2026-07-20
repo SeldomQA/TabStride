@@ -34,7 +34,6 @@ export interface BrowserMeta {
 export interface HandshakeInput {
   instanceId: string;
   browser: BrowserMeta;
-  label: string;
   /**
    * Used to make the handshake's RPC id stable in tests. Defaults to a
    * random short string.
@@ -66,7 +65,9 @@ export function performHandshake(
     protocol_version: PROTOCOL_VERSION,
     instance_id: input.instanceId,
     browser: input.browser,
-    label: input.label,
+    // Kept on the wire for protocol 1.0 compatibility; browser aliases are
+    // no longer exposed or stored by the extension.
+    label: "",
     min_compatible_peer: MIN_COMPATIBLE_PEER,
     min_compatible_protocol: MIN_COMPATIBLE_PROTOCOL,
   };
