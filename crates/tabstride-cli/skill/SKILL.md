@@ -9,28 +9,28 @@ description: |
 
 # tabstride
 
-Drive the user's **real Chromium browser** (with their logins and cookies) through the `tabstride` CLI. The extension opens an isolated **Agent Window** for automation; the user's normal windows stay protected unless you explicitly borrow a tab.
+Drive the user's **real Chromium browser** (with their logins and cookies) through the `tabstride` CLI. Use an isolated **Agent Window** by default, or use **attach mode** when the user explicitly asks to control one existing tab in place.
 
 ## When to use
 
 - Open pages, read titles/text, scrape structured data from sites the user can already access
 - Fill forms, click through multi-step flows, smoke-test a UI change
 - Understand pages with `tabstride snapshot` first; use `tabstride get-html` or `tabstride screenshot` only when the snapshot is insufficient
-- Operate on a specific user tab they point you at (after `tabstride tab borrow`)
+- Operate on the user's current tab in place with an explicit attach session
 
 ## When NOT to use
 
 - Tasks with **no browser** involved (files, APIs, databases only)
 - Installing or configuring the extension (point the user to setup docs instead)
 - **Credential harvesting** — never run `tabstride evaluate` on banking, SSO, or password-manager pages to extract tokens, cookies, or secrets
-- Long-lived control of a user's personal login window — borrow only for the immediate step, then `tabstride tab return` or end the session
+- Long-lived control of a user's personal tab — attach or borrow only for the immediate task, then end the session
 - Replacing the user's manual browsing when they only wanted an explanation
 
 ## Prerequisites
 
 1. `tabstride` on `PATH` (Rust CLI from tabstride)
 2. tabstride **extension** loaded in Chromium and connected (popup shows green)
-3. Any `tabstride` command auto-starts background services as needed; use `tabstride doctor` if anything fails
+3. `tabstride serve` running visibly in a separate terminal; business commands never auto-start it
 
 ## Mandatory workflow
 
@@ -42,13 +42,18 @@ Every automation task **must** follow this lifecycle. Do **not** rely on idle ti
 3. tabstride session stop <id>          → REQUIRED when done (even on error paths)
 ```
 
-Optional: `tabstride session start --browser <instance-id-or-label>` when multiple browsers are connected (`tabstride browsers` / error output lists them).
+Choose the session mode from the user's intent:
 
-Emergency cleanup: `tabstride session stop --all` or the Agent Window overlay **Stop all**.
+- **Isolated (default):** `tabstride session start` opens a dedicated Agent Window.
+- **Attach:** `tabstride session start --mode attach --tab active` controls the active tab in the current user window without creating or moving a window/tab. Use `--tab-id <id>` instead of `--tab active` only when the user has identified a specific tab id.
+
+Optional: add `--browser <instance-id>` to either session-start mode when multiple browsers are connected (`tabstride browsers` / error output lists their ids).
+
+Emergency cleanup: `tabstride session stop --all`.
 
 ## Core interaction loop
 
-Write operations only affect tabs in the **Agent Window** (or tabs you **borrowed** into it).
+Write operations affect only the current session target: an Agent Window tab in isolated mode, or the single leased tab in attach mode.
 
 ```
 tabstride navigate <url> --session <id>
@@ -75,10 +80,12 @@ Do **not** call `tabstride get-html` or `tabstride screenshot` first just to ins
 
 | Rule | Detail |
 |------|--------|
-| Agent Window | `tabstride tab create`, `tabstride navigate`, `tabstride click`, etc. work on agent tabs by default |
-| User tabs | Read-only until borrowed: `tabstride tab list --session <id> --scope user` then `tabstride tab borrow <tab-id> --session <id>` |
+| Isolated mode | `tabstride tab create`, `tabstride navigate`, `tabstride click`, etc. work on Agent Window tabs by default |
+| Attach mode | Only the explicitly leased existing tab is visible to the session; sibling tabs are inaccessible |
+| User tabs in isolated mode | Read-only until borrowed: `tabstride tab list --session <id> --scope user` then `tabstride tab borrow <tab-id> --session <id>` |
 | Return borrowed tabs | Call `tabstride tab return <tab-id> --session <id>` when finished; unreturned tabs are **auto-returned** on `tabstride session stop` |
-| Writes off-agent | Commands that mutate the page fail if the tab is not in the Agent Window — borrow or create a tab first |
+| Tab management in attach mode | `tab create`, `tab close`, `tab borrow`, and `tab return` are unavailable; do not work around this boundary |
+| Stop behavior | Isolated stop closes the Agent Window; attach stop releases control and its overlay but keeps the user's tab/window open |
 
 ## Global flags
 
@@ -106,8 +113,9 @@ Details and flags: **`tabstride <cmd> --help`**
 
 | Command | Summary |
 |---------|---------|
-| `tabstride session start` | Open Agent Window; prints **4-letter session id** |
-| `tabstride session stop <id>` | End session, close Agent Window, auto-return borrowed tabs |
+| `tabstride session start` | Start an isolated Agent Window session; prints **4-letter session id** |
+| `tabstride session start --mode attach --tab active` | Lease the current active user tab in place; `--tab-id <id>` targets a known tab id |
+| `tabstride session stop <id>` | End session; close isolated window or release attach tab; auto-return borrowed tabs |
 | `tabstride session stop --all` | Stop every active session |
 | `tabstride session list` | List active sessions |
 
@@ -198,7 +206,7 @@ which refs/selectors matched a live element.
 | Code | Meaning | What to do |
 |------|---------|------------|
 | `0` | Success (including `evaluate` where JS threw but RPC succeeded) | Continue |
-| `1` | User error — bad args, unknown session, tab not in Agent Window, stale ref | Fix args; `tabstride session list`; re-snapshot |
+| `1` | User error — bad args, unknown session, target outside session scope, stale ref | Fix args; `tabstride session list`; re-snapshot |
 | `2` | Protocol / transport — service unreachable, IPC failure | `tabstride doctor`; check extension connected; retry the command |
 | `3` | Browser / CDP execution failed | Retry; simplify selector; check tab still open |
 | `4` | Timeout | Increase `--timeout`; try `--wait-until domcontentloaded` |
@@ -212,14 +220,14 @@ Human errors print `error:` + `hint:` on stderr; `--json` includes `code`, `mess
 |-----------|---------|
 | Before first task in a session | `tabstride status` — extension connected? |
 | Any failure you cannot fix in one retry | `tabstride doctor` |
-| Multiple browsers / wrong target | `tabstride browsers` then `tabstride session start --browser <id>` |
+| Multiple browsers / wrong target | `tabstride browsers` then add `--browser <instance-id>` to the isolated or attach start command |
 
-Always **`tabstride session stop <id>`** in a `finally`-style path so the Agent Window closes and borrowed tabs return.
+Always **`tabstride session stop <id>`** in a `finally`-style path so the Agent Window closes or the attach lease and control overlay are released, and borrowed tabs return.
 
 ## Red lines
 
 1. **No token theft** — do not `tabstride evaluate` on sensitive sites to read `localStorage`, cookies, or auth headers for exfiltration.
-2. **No long borrow** — do not leave a user's personal tab in the Agent Window across unrelated tasks.
+2. **No long control** — do not leave a user's personal tab attached or borrowed across unrelated tasks.
 3. **No skip stop** — always `tabstride session stop <id>`; never assume idle timeout will clean up.
 4. **No observe escalation before snapshot** — use `tabstride snapshot` first; only use `tabstride get-html` or `tabstride screenshot` when the snapshot is insufficient. Element screenshots (`--ref @eN`) still require a fresh snapshot ref — never skip snapshot just to grab a visual.
 5. **`evaluate` is powerful and risky** — use only when snapshot + click/fill/select cannot suffice; never on credential surfaces.
