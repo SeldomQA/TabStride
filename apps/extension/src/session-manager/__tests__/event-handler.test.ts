@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ConnectionStateHandler, FrameHandler, Transport } from "@/transport/transport";
 import type { ConnectionState, ProtocolFrame } from "@/transport/types";
+import type { TabRemovedListener } from "../event-handler";
 import { attachSessionEventHandler, type WindowRemovedListener } from "../event-handler";
 import { SessionManager } from "../manager";
 
@@ -16,6 +17,20 @@ function fakeWindowEvents() {
       for (const l of listeners) l(id);
     },
     listenerCount: () => listeners.size,
+  };
+}
+
+function fakeTabEvents() {
+  const listeners = new Set<(tabId: number) => void>();
+  const api: TabRemovedListener = {
+    addListener: (cb) => listeners.add(cb),
+    removeListener: (cb) => listeners.delete(cb),
+  };
+  return {
+    api,
+    emit(id: number) {
+      for (const listener of listeners) listener(id);
+    },
   };
 }
 
@@ -122,6 +137,42 @@ describe("attachSessionEventHandler", () => {
     events.emit(9999);
     await Promise.resolve();
     expect(transport.sent).toEqual([]);
+  });
+
+  it("drops an attach session when its leased tab closes without closing the user window", async () => {
+    const remove = vi.fn(async () => {});
+    const manager = new SessionManager({
+      agentWindow: {
+        create: vi.fn(async () => 1),
+        remove,
+        ensureActiveTab: vi.fn(async () => {}),
+      },
+    });
+    manager.startAttached("aa11", 77, 9);
+    const transport = fakeTransport();
+    const windowEvents = fakeWindowEvents();
+    const tabEvents = fakeTabEvents();
+    const cdp = { detachSession: vi.fn(async () => {}) };
+    attachSessionEventHandler({
+      manager,
+      transport,
+      windowEvents: windowEvents.api,
+      tabEvents: tabEvents.api,
+      cdp,
+    });
+
+    tabEvents.emit(77);
+    await vi.waitUntil(() => transport.sent.length > 0);
+
+    expect(cdp.detachSession).toHaveBeenCalledWith("aa11");
+    expect(remove).not.toHaveBeenCalled();
+    expect(manager.has("aa11")).toBe(false);
+    expect(transport.sent).toEqual([
+      {
+        event: "session.window_closed",
+        payload: { session_id: "aa11", reason: "attached_tab_closed" },
+      },
+    ]);
   });
 
   it("dispose() removes the listener", () => {

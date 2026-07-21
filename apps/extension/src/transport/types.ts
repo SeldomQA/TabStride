@@ -22,6 +22,7 @@ export type ErrorCode =
 /** Stable `RpcError.data.reason` values for CLI hint selection. */
 export type RpcErrorReason =
   | "agent_window_scope"
+  | "attached_tab_scope"
   | "element_not_visible"
   | "ref_not_found"
   | "selector_not_found"

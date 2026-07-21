@@ -5,6 +5,7 @@ use std::time::Duration;
 use clap::Parser;
 use tabstride::cli::daemon::{DaemonCmd, parse_duration};
 use tabstride::cli::navigate::NavigateCmd;
+use tabstride::cli::session::{CliSessionMode, CliTabTarget, SessionSub};
 use tabstride::daemon::DaemonConfig;
 use tabstride::{Cli, Command};
 
@@ -152,6 +153,49 @@ fn rejects_zero_console_bounds() {
 fn parses_install_skill_subcommand() {
     let cli = parse(&["tabstride", "install-skill", "--list"]);
     assert!(matches!(cli.command, Command::InstallSkill(_)));
+}
+
+#[test]
+fn parses_attach_session_targeting_active_tab() {
+    let cli = parse(&[
+        "tabstride",
+        "session",
+        "start",
+        "--mode",
+        "attach",
+        "--tab",
+        "active",
+    ]);
+    let Command::Session(cmd) = cli.command else {
+        panic!("expected session command");
+    };
+    let SessionSub::Start(args) = cmd.sub else {
+        panic!("expected session start");
+    };
+    assert_eq!(args.mode, CliSessionMode::Attach);
+    assert_eq!(args.tab, Some(CliTabTarget::Active));
+    assert_eq!(args.tab_id, None);
+}
+
+#[test]
+fn parses_attach_session_targeting_explicit_tab_id() {
+    let cli = parse(&[
+        "tabstride",
+        "session",
+        "start",
+        "--mode",
+        "attach",
+        "--tab-id",
+        "77",
+    ]);
+    let Command::Session(cmd) = cli.command else {
+        panic!("expected session command");
+    };
+    let SessionSub::Start(args) = cmd.sub else {
+        panic!("expected session start");
+    };
+    assert_eq!(args.mode, CliSessionMode::Attach);
+    assert_eq!(args.tab_id, Some(77));
 }
 
 #[test]

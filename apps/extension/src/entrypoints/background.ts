@@ -124,8 +124,11 @@ export default defineBackground(() => {
     if (!msg || typeof msg !== "object" || !("kind" in msg)) return false;
 
     if (msg.kind === OVERLAY_MSG_WHO_AM_I) {
+      const tabId = sender.tab?.id;
       const windowId = sender.tab?.windowId;
-      const ctx = typeof windowId === "number" ? sessions.findByWindowId(windowId) : null;
+      const ctx =
+        (typeof tabId === "number" ? sessions.findByTabId(tabId) : null) ??
+        (typeof windowId === "number" ? sessions.findByWindowId(windowId) : null);
       sendResponse({ sessionId: ctx?.sessionId ?? null });
       return false;
     }

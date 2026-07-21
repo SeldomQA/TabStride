@@ -143,6 +143,7 @@ async fn session_start_stop_round_trip_via_ipc() {
                             serde_json::from_value(req.params.clone().unwrap()).unwrap();
                         let result = SessionStartResult {
                             agent_window_id: Some(4242),
+                            attached_tab_id: None,
                         };
                         ResponseFrame {
                             id: req.id,
@@ -299,6 +300,7 @@ async fn session_start_waits_for_late_extension_handshake() {
             }
             let result = SessionStartResult {
                 agent_window_id: Some(4242),
+                attached_tab_id: None,
             };
             let resp = Frame::Response(ResponseFrame {
                 id: req.id,
@@ -441,6 +443,7 @@ async fn session_start_with_browser_instance_id_picks_target() {
             {
                 let result = SessionStartResult {
                     agent_window_id: Some(123),
+                    attached_tab_id: None,
                 };
                 let reply = ResponseFrame {
                     id: req.id,
@@ -545,6 +548,7 @@ async fn session_start_label_match_picks_target() {
             {
                 let result = SessionStartResult {
                     agent_window_id: Some(456),
+                    attached_tab_id: None,
                 };
                 let reply = ResponseFrame {
                     id: req.id,
@@ -634,6 +638,8 @@ async fn session_window_closed_event_purges_session() {
         id: tabstride::daemon::sessions::SessionId("zzzz".into()),
         browser_id: tabstride::daemon::browsers::BrowserId(TEST_EXT_ID.into()),
         agent_window_id: Some(7),
+        mode: tabstride_protocol::tools::SessionMode::Isolated,
+        attached_tab_id: None,
         created_at_ms: 0,
     };
     state.sessions.insert(session);
@@ -671,6 +677,8 @@ async fn browser_disconnect_purges_sessions() {
         id: tabstride::daemon::sessions::SessionId("zzzz".into()),
         browser_id: tabstride::daemon::browsers::BrowserId(TEST_EXT_ID.into()),
         agent_window_id: Some(7),
+        mode: tabstride_protocol::tools::SessionMode::Isolated,
+        attached_tab_id: None,
         created_at_ms: 0,
     };
     state.sessions.insert(session);
@@ -701,6 +709,8 @@ async fn session_stop_self_heals_when_extension_reports_not_found() {
         id: tabstride::daemon::sessions::SessionId("yyyy".into()),
         browser_id: tabstride::daemon::browsers::BrowserId(TEST_EXT_ID.into()),
         agent_window_id: Some(99),
+        mode: tabstride_protocol::tools::SessionMode::Isolated,
+        attached_tab_id: None,
         created_at_ms: 1,
     };
     state.sessions.insert(session);
@@ -801,6 +811,8 @@ async fn reconnect_with_same_instance_id_does_not_clobber_new_browser() {
         id: tabstride::daemon::sessions::SessionId("xxxx".into()),
         browser_id: tabstride::daemon::browsers::BrowserId(TEST_EXT_ID.into()),
         agent_window_id: Some(11),
+        mode: tabstride_protocol::tools::SessionMode::Isolated,
+        attached_tab_id: None,
         created_at_ms: 1,
     };
     state.sessions.insert(session);
@@ -846,16 +858,31 @@ async fn reserve_id_loops_until_vacant_and_caps_attempts() {
     // is random so we cannot assert its value, but we can assert that a
     // second reservation never produces the same id.
     let first = registry
-        .reserve_id(browser.clone(), 64, || 1)
+        .reserve_id(
+            browser.clone(),
+            tabstride_protocol::tools::SessionMode::Isolated,
+            64,
+            || 1,
+        )
         .expect("first reservation should succeed");
     let second = registry
-        .reserve_id(browser.clone(), 64, || 2)
+        .reserve_id(
+            browser.clone(),
+            tabstride_protocol::tools::SessionMode::Isolated,
+            64,
+            || 2,
+        )
         .expect("second reservation should succeed");
     assert_ne!(first, second, "reserve_id must avoid collisions");
     assert_eq!(registry.len(), 2);
 
     // A capped attempts budget of 0 surfaces the IdExhausted condition.
-    let exhausted = registry.reserve_id(browser, 0, || 3);
+    let exhausted = registry.reserve_id(
+        browser,
+        tabstride_protocol::tools::SessionMode::Isolated,
+        0,
+        || 3,
+    );
     assert!(exhausted.is_none(), "0-attempt budget should bail out");
 
     // Cancelling makes the slot vacant again.

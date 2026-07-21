@@ -103,6 +103,13 @@ export async function resolveTargetTab(
         message: "tab_id must be a positive integer",
       };
     }
+    if (ctx.mode === "attach" && tabId !== ctx.attachedTabId) {
+      return rpcError(
+        "permission_denied",
+        "attached_tab_scope",
+        `tab ${tabId} is outside the attach lease for session ${ctx.sessionId}`,
+      );
+    }
     let tab: chrome.tabs.Tab;
     try {
       tab = await api.get(tabId);
@@ -125,7 +132,32 @@ export async function resolveTargetTab(
         message: `tab ${tabId} not found in session scope`,
       };
     }
+    const attachedOwner =
+      typeof manager.findByAttachedTabId === "function"
+        ? manager.findByAttachedTabId(tab.id)
+        : null;
+    if (attachedOwner && attachedOwner.sessionId !== ctx.sessionId) {
+      return { code: "not_found", message: `tab ${tabId} not found in session scope` };
+    }
     return { tabId: tab.id, windowId: tab.windowId, active: tab.active === true };
+  }
+  if (ctx.mode === "attach") {
+    const attachedTabId = ctx.attachedTabId;
+    if (attachedTabId === undefined) {
+      return { code: "protocol_error", message: `attach session ${ctx.sessionId} has no tab` };
+    }
+    try {
+      const tab = await api.get(attachedTabId);
+      if (typeof tab.id !== "number" || typeof tab.windowId !== "number") {
+        return { code: "not_found", message: `attached tab ${attachedTabId} not found` };
+      }
+      return { tabId: tab.id, windowId: tab.windowId, active: tab.active === true };
+    } catch (err) {
+      return {
+        code: "not_found",
+        message: err instanceof Error ? err.message : `attached tab ${attachedTabId} not found`,
+      };
+    }
   }
   const tabs = await api.query({ active: true, windowId: ctx.agentWindowId });
   const first = tabs.find((t) => typeof t.id === "number");
@@ -164,6 +196,14 @@ export function enforceAgentWindow(
   target: { tabId: number; windowId: number },
   toolName: string,
 ): RpcError | null {
+  if (ctx.mode === "attach") {
+    if (target.tabId === ctx.attachedTabId) return null;
+    return rpcError(
+      "permission_denied",
+      "attached_tab_scope",
+      `${toolName} can only act on attached tab ${ctx.attachedTabId}`,
+    );
+  }
   if (target.windowId !== ctx.agentWindowId) {
     return rpcError(
       "permission_denied",

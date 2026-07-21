@@ -527,6 +527,10 @@ pub struct SessionStatusEntry {
     pub browser_instance_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_window_id: Option<i64>,
+    #[serde(default)]
+    pub mode: crate::tools::SessionMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attached_tab_id: Option<i64>,
     /// Unix epoch milliseconds.
     pub created_at_ms: i64,
 }

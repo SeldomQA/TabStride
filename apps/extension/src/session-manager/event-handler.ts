@@ -11,10 +11,16 @@ export interface WindowRemovedListener {
   removeListener(cb: (windowId: number) => void): void;
 }
 
+export interface TabRemovedListener {
+  addListener(cb: (tabId: number) => void): void;
+  removeListener(cb: (tabId: number) => void): void;
+}
+
 export interface SessionEventHandlerOptions {
   manager: SessionManager;
   transport: Transport;
   windowEvents?: WindowRemovedListener;
+  tabEvents?: TabRemovedListener;
   cdp?: {
     detachSession(sessionId: string): Promise<void>;
   };
@@ -33,6 +39,16 @@ function chromeWindowEvents(): WindowRemovedListener {
   };
 }
 
+function chromeTabEvents(): TabRemovedListener {
+  if (typeof chrome === "undefined" || !chrome.tabs?.onRemoved) {
+    return { addListener: () => {}, removeListener: () => {} };
+  }
+  return {
+    addListener: (cb) => chrome.tabs.onRemoved.addListener(cb),
+    removeListener: (cb) => chrome.tabs.onRemoved.removeListener(cb),
+  };
+}
+
 /**
  * Watch for the user closing an Agent Window. When that happens we:
  *  1. Drop the local SessionContext (without trying to close the window
@@ -47,6 +63,7 @@ export function attachSessionEventHandler(options: SessionEventHandlerOptions): 
 } {
   const { manager, transport, onSessionsChanged } = options;
   const events = options.windowEvents ?? chromeWindowEvents();
+  const tabEvents = options.tabEvents ?? chromeTabEvents();
 
   const onRemoved = (windowId: number): void => {
     const ctx = manager.findByWindowId(windowId);
@@ -90,8 +107,39 @@ export function attachSessionEventHandler(options: SessionEventHandlerOptions): 
       });
   };
 
+  const onTabRemoved = (tabId: number): void => {
+    const ctx = manager.findByAttachedTabId(tabId);
+    if (!ctx) return;
+    const detach = options.cdp
+      ? options.cdp.detachSession(ctx.sessionId).catch((err) => {
+          console.debug("[tabstride] attach-session cdp detach failed", err);
+        })
+      : Promise.resolve();
+    void detach
+      .then(() => manager.stop(ctx.sessionId, { dropOnly: true }))
+      .then(() => {
+        onSessionsChanged?.();
+        const event: EventFrame = {
+          event: "session.window_closed",
+          payload: { session_id: ctx.sessionId, reason: "attached_tab_closed" },
+        };
+        try {
+          transport.send(event);
+        } catch (err) {
+          console.warn("[tabstride] could not report attached tab close", err);
+        }
+      })
+      .catch((err) => {
+        console.warn("[tabstride] attach-session tab removal handler failed", err);
+      });
+  };
+
   events.addListener(onRemoved);
+  tabEvents.addListener(onTabRemoved);
   return {
-    dispose: () => events.removeListener(onRemoved),
+    dispose: () => {
+      events.removeListener(onRemoved);
+      tabEvents.removeListener(onTabRemoved);
+    },
   };
 }

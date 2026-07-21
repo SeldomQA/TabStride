@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SessionManager } from "@/session-manager/manager";
-import { handleSessionStop } from "../session";
+import { handleSessionStart, handleSessionStop } from "../session";
 import { type AgentOverlayResetApi, type ChromeWindowsApi, type TabMutationApi } from "../tabs";
 
 function fakeAgentWindow(ids: number[]) {
@@ -14,6 +14,56 @@ function fakeAgentWindow(ids: number[]) {
   const ensureActiveTab = vi.fn(async () => {});
   return { create, remove, ensureActiveTab };
 }
+
+describe("handleSessionStart attach mode", () => {
+  it("leases the active tab in the last-focused user window without creating a window", async () => {
+    const aw = fakeAgentWindow([100]);
+    const sm = new SessionManager({ agentWindow: aw });
+    const active = { id: 77, windowId: 9, active: true } as chrome.tabs.Tab;
+    const result = await handleSessionStart(
+      sm,
+      { session_id: "aa11", mode: "attach", tab: "active" },
+      {
+        windows: {
+          getLastFocused: vi.fn(async () => ({ id: 9, tabs: [active] }) as chrome.windows.Window),
+          getAll: vi.fn(async () => []),
+        },
+        tabs: { get: vi.fn(async () => active) },
+      },
+    );
+
+    expect(result).toEqual({ attached_tab_id: 77 });
+    expect(sm.get("aa11")).toMatchObject({ mode: "attach", attachedTabId: 77 });
+    expect(aw.create).not.toHaveBeenCalled();
+  });
+
+  it("attaches an explicit tab id and refuses a duplicate lease", async () => {
+    const aw = fakeAgentWindow([100]);
+    const sm = new SessionManager({ agentWindow: aw });
+    const target = { id: 77, windowId: 9, active: false } as chrome.tabs.Tab;
+    const deps = {
+      tabs: { get: vi.fn(async () => target) },
+      windows: { getLastFocused: vi.fn(), getAll: vi.fn() },
+    };
+
+    expect(
+      await handleSessionStart(sm, { session_id: "aa11", mode: "attach", tab_id: 77 }, deps),
+    ).toEqual({ attached_tab_id: 77 });
+    const conflict = await handleSessionStart(
+      sm,
+      { session_id: "bb22", mode: "attach", tab_id: 77 },
+      deps,
+    );
+    expect(conflict).toMatchObject({ code: "permission_denied" });
+  });
+
+  it("requires an explicit attach target", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    expect(await handleSessionStart(sm, { session_id: "aa11", mode: "attach" })).toMatchObject({
+      code: "invalid_params",
+    });
+  });
+});
 
 interface FakeState {
   tabs: Map<number, chrome.tabs.Tab>;
@@ -65,6 +115,45 @@ function makeApis(
 }
 
 describe("handleSessionStop with auto-return", () => {
+  it("clears the attached-tab control overlay before detaching CDP", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    sm.startAttached("aa11", 77, 9);
+    const order: string[] = [];
+    const agentOverlayReset = {
+      resetAgentOverlays: vi.fn(async () => {
+        order.push("overlay-reset");
+      }),
+    } satisfies AgentOverlayResetApi;
+    const cdp = {
+      detachSession: vi.fn(async () => {
+        order.push("cdp-detach");
+      }),
+    };
+
+    const res = await handleSessionStop(sm, { session_id: "aa11" }, { cdp, agentOverlayReset });
+
+    if ("code" in res) throw new Error(`unexpected error: ${JSON.stringify(res)}`);
+    expect(agentOverlayReset.resetAgentOverlays).toHaveBeenCalledWith(77, "aa11");
+    expect(cdp.detachSession).toHaveBeenCalledWith("aa11");
+    expect(order).toEqual(["overlay-reset", "cdp-detach"]);
+    expect(sm.has("aa11")).toBe(false);
+  });
+
+  it("still releases an attach session when its content script is unavailable", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    sm.startAttached("aa11", 77, 9);
+    const agentOverlayReset = {
+      resetAgentOverlays: vi.fn(async () => {
+        throw new Error("Receiving end does not exist");
+      }),
+    } satisfies AgentOverlayResetApi;
+
+    const res = await handleSessionStop(sm, { session_id: "aa11" }, { agentOverlayReset });
+
+    if ("code" in res) throw new Error(`unexpected error: ${JSON.stringify(res)}`);
+    expect(sm.has("aa11")).toBe(false);
+  });
+
   it("returns every borrowed tab and closes the Agent Window in the right order", async () => {
     const aw = fakeAgentWindow([100]);
     const sm = new SessionManager({ agentWindow: aw });

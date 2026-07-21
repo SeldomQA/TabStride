@@ -3,7 +3,12 @@ import { RefStore } from "./ref-store";
 
 export interface SessionContext {
   sessionId: string;
+  mode: "isolated" | "attach";
+  /** Dedicated Agent Window for isolated sessions; the user's existing
+   * window for attach sessions. Never close this id when mode=attach. */
   agentWindowId: number;
+  /** The only leased tab for attach sessions. */
+  attachedTabId?: number;
   refStore: RefStore;
   borrowedTabs: Map<number, BorrowedTab>;
   createdAtMs: number;
@@ -40,6 +45,7 @@ export interface SessionManagerOptions {
 export class SessionManager {
   private readonly sessions = new Map<string, SessionContext>();
   private readonly windowIndex = new Map<number, string>();
+  private readonly attachedTabIndex = new Map<number, string>();
   private readonly borrowReservations = new Map<number, string>();
   private readonly agentWindow: AgentWindowApi;
   private readonly now: () => number;
@@ -62,6 +68,20 @@ export class SessionManager {
     return id ? (this.sessions.get(id) ?? null) : null;
   }
 
+  findByAttachedTabId(tabId: number): SessionContext | null {
+    const id = this.attachedTabIndex.get(tabId);
+    return id ? (this.sessions.get(id) ?? null) : null;
+  }
+
+  findByTabId(tabId: number): SessionContext | null {
+    const attached = this.findByAttachedTabId(tabId);
+    if (attached) return attached;
+    for (const ctx of this.sessions.values()) {
+      if (ctx.borrowedTabs.has(tabId)) return ctx;
+    }
+    return null;
+  }
+
   list(): SessionContext[] {
     return Array.from(this.sessions.values());
   }
@@ -76,6 +96,8 @@ export class SessionManager {
    * Returns the borrowing session id when applicable, otherwise null.
    */
   findBorrowingSession(tabId: number, currentSessionId: string | null): string | null {
+    const attachedBy = this.attachedTabIndex.get(tabId);
+    if (attachedBy && attachedBy !== currentSessionId) return attachedBy;
     for (const ctx of this.sessions.values()) {
       if (ctx.sessionId === currentSessionId) continue;
       if (ctx.borrowedTabs.has(tabId)) return ctx.sessionId;
@@ -136,6 +158,7 @@ export class SessionManager {
     await this.agentWindow.ensureActiveTab(windowId, AGENT_WINDOW_HOME);
     const ctx: SessionContext = {
       sessionId,
+      mode: "isolated",
       agentWindowId: windowId,
       refStore: new RefStore(),
       borrowedTabs: new Map(),
@@ -143,6 +166,37 @@ export class SessionManager {
     };
     this.sessions.set(sessionId, ctx);
     this.windowIndex.set(windowId, sessionId);
+    return ctx;
+  }
+
+  /** Register an in-place lease on one existing user tab. No window or tab
+   * is created, moved, focused, or closed by this operation. */
+  startAttached(sessionId: string, tabId: number, windowId: number): SessionContext {
+    if (this.sessions.has(sessionId)) {
+      throw new Error(`[bh] session ${sessionId} already exists`);
+    }
+    const leasedBy = this.attachedTabIndex.get(tabId);
+    if (leasedBy) {
+      throw new Error(`tab ${tabId} is already attached by session ${leasedBy}`);
+    }
+    const borrowedBy = this.findBorrowingSession(tabId, sessionId);
+    if (borrowedBy) {
+      throw new Error(`tab ${tabId} is already controlled by session ${borrowedBy}`);
+    }
+    if (this.findByWindowId(windowId)) {
+      throw new Error(`tab ${tabId} belongs to an Agent Window`);
+    }
+    const ctx: SessionContext = {
+      sessionId,
+      mode: "attach",
+      agentWindowId: windowId,
+      attachedTabId: tabId,
+      refStore: new RefStore(),
+      borrowedTabs: new Map(),
+      createdAtMs: this.now(),
+    };
+    this.sessions.set(sessionId, ctx);
+    this.attachedTabIndex.set(tabId, sessionId);
     return ctx;
   }
 
@@ -159,11 +213,15 @@ export class SessionManager {
   ): Promise<SessionContext | null> {
     const ctx = this.sessions.get(sessionId);
     if (!ctx) return null;
-    if (!options.dropOnly) {
+    if (!options.dropOnly && ctx.mode === "isolated") {
       await this.agentWindow.remove(ctx.agentWindowId);
     }
     this.sessions.delete(sessionId);
-    this.windowIndex.delete(ctx.agentWindowId);
+    if (ctx.mode === "isolated") {
+      this.windowIndex.delete(ctx.agentWindowId);
+    } else if (ctx.attachedTabId !== undefined) {
+      this.attachedTabIndex.delete(ctx.attachedTabId);
+    }
     return ctx;
   }
 

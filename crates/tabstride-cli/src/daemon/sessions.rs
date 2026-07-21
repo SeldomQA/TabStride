@@ -12,7 +12,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tabstride_protocol::system::{BrowserStatusEntry, SessionStatusEntry};
 use tabstride_protocol::tools::{
-    SessionStartParams, SessionStartResult, SessionStopParams, SessionStopResult,
+    SessionMode, SessionStartParams, SessionStartResult, SessionStopParams, SessionStopResult,
 };
 use tabstride_protocol::{Frame, RequestFrame, ResponseBody, RpcError, RpcId};
 use tokio::time::{Duration, timeout};
@@ -49,6 +49,8 @@ pub struct Session {
     pub id: SessionId,
     pub browser_id: BrowserId,
     pub agent_window_id: Option<i64>,
+    pub mode: SessionMode,
+    pub attached_tab_id: Option<i64>,
     pub created_at_ms: i64,
 }
 
@@ -58,6 +60,8 @@ impl Session {
             session_id: self.id.0.clone(),
             browser_instance_id: self.browser_id.0.clone(),
             agent_window_id: self.agent_window_id,
+            mode: self.mode,
+            attached_tab_id: self.attached_tab_id,
             created_at_ms: self.created_at_ms,
         }
     }
@@ -123,6 +127,7 @@ impl SessionRegistry {
     pub fn reserve_id(
         &self,
         browser_id: BrowserId,
+        mode: SessionMode,
         max_attempts: u32,
         now_ms_fn: impl Fn() -> i64,
     ) -> Option<SessionId> {
@@ -138,6 +143,8 @@ impl SessionRegistry {
                     id: candidate.clone(),
                     browser_id: browser_id.clone(),
                     agent_window_id: None,
+                    mode,
+                    attached_tab_id: None,
                     created_at_ms: now_ms_fn(),
                 },
             );
@@ -154,10 +161,12 @@ impl SessionRegistry {
         &self,
         session_id: &SessionId,
         agent_window_id: Option<i64>,
+        attached_tab_id: Option<i64>,
     ) -> Option<Session> {
         let mut guard = self.inner.lock().expect("session registry poisoned");
         let session = guard.get_mut(session_id)?;
         session.agent_window_id = agent_window_id;
+        session.attached_tab_id = attached_tab_id;
         Some(session.clone())
     }
 
@@ -327,22 +336,79 @@ pub enum StopSessionError {
 /// of live sessions.
 const SESSION_ID_MAX_RESERVE_ATTEMPTS: u32 = 64;
 
-/// Ask the chosen browser to create a fresh Agent Window for a brand-new
-/// session id, registering the result on success.
+#[derive(Debug, Clone, Copy)]
+pub struct StartSessionRequest<'a> {
+    pub requested_browser: Option<&'a str>,
+    pub mode: SessionMode,
+    pub tab: Option<&'a str>,
+    pub tab_id: Option<i64>,
+    pub connect_wait: Duration,
+    pub timeout: Duration,
+}
+
+fn validate_start_result(
+    mode: SessionMode,
+    result: SessionStartResult,
+) -> Result<(Option<i64>, Option<i64>), RpcError> {
+    let valid = match mode {
+        SessionMode::Isolated => {
+            result.agent_window_id.is_some() && result.attached_tab_id.is_none()
+        }
+        SessionMode::Attach => result.agent_window_id.is_none() && result.attached_tab_id.is_some(),
+    };
+    if !valid {
+        return Err(RpcError {
+            code: tabstride_protocol::ErrorCode::ProtocolError,
+            message: format!("extension returned an invalid {mode:?} session target"),
+            data: None,
+        });
+    }
+    Ok((result.agent_window_id, result.attached_tab_id))
+}
+
+async fn rollback_extension_session(
+    client: &BrowserClient,
+    session_id: &SessionId,
+    timeout_dur: Duration,
+) {
+    let rpc_id = next_rpc_id("sess-start-rollback");
+    let waiter = {
+        let mut pending = client.pending.lock().unwrap();
+        pending.register(rpc_id.clone())
+    };
+    let frame = RequestFrame {
+        id: rpc_id.clone(),
+        method: tabstride_protocol::Method::ToolSessionStop,
+        params: Some(
+            serde_json::to_value(SessionStopParams {
+                session_id: session_id.0.clone(),
+            })
+            .unwrap(),
+        ),
+    };
+    if client.sink.send(Frame::Request(frame)).is_err() {
+        client.pending.lock().unwrap().cancel(&rpc_id);
+        return;
+    }
+    if timeout(timeout_dur, waiter).await.is_err() {
+        client.pending.lock().unwrap().cancel(&rpc_id);
+    }
+}
+
+/// Ask the chosen browser to create a new isolated session or lease one
+/// existing tab for an attach session, registering the result on success.
 ///
 /// On success the matching per-session dispatch queue (M6.5,
 /// design §5) is also spawned so that subsequent `tool.*` RPCs serialise
-/// against this session's Agent Window / ref-store.
+/// against this session's target tab / ref-store.
 pub async fn start_session(
     registry: &Arc<BrowserRegistry>,
     sessions: &Arc<SessionRegistry>,
     queues: &Arc<ToolQueueRegistry>,
-    requested: Option<&str>,
-    connect_wait: Duration,
-    timeout_dur: Duration,
+    request: StartSessionRequest<'_>,
 ) -> Result<Session, StartSessionError> {
     let client: Arc<BrowserClient> = registry
-        .select_with_connect_wait(requested, connect_wait)
+        .select_with_connect_wait(request.requested_browser, request.connect_wait)
         .await
         .map_err(|e| match e {
             SelectError::NoBrowserConnected => StartSessionError::NoBrowserConnected,
@@ -359,14 +425,22 @@ pub async fn start_session(
             },
         })?;
     let session_id = sessions
-        .reserve_id(client.id.clone(), SESSION_ID_MAX_RESERVE_ATTEMPTS, now_ms)
+        .reserve_id(
+            client.id.clone(),
+            request.mode,
+            SESSION_ID_MAX_RESERVE_ATTEMPTS,
+            now_ms,
+        )
         .ok_or(StartSessionError::IdExhausted)?;
     let params = SessionStartParams {
         session_id: session_id.0.clone(),
         browser_instance_id: Some(client.id.0.clone()),
+        mode: request.mode,
+        tab: request.tab.map(str::to_owned),
+        tab_id: request.tab_id,
     };
     let rpc_id = next_rpc_id("sess-start");
-    let request = RequestFrame {
+    let frame = RequestFrame {
         id: rpc_id.clone(),
         method: tabstride_protocol::Method::ToolSessionStart,
         params: Some(serde_json::to_value(&params).unwrap()),
@@ -375,12 +449,12 @@ pub async fn start_session(
         let mut pending = client.pending.lock().unwrap();
         pending.register(rpc_id.clone())
     };
-    if client.sink.send(Frame::Request(request)).is_err() {
+    if client.sink.send(Frame::Request(frame)).is_err() {
         sessions.cancel_reservation(&session_id);
         client.pending.lock().unwrap().cancel(&rpc_id);
         return Err(StartSessionError::TransportClosed);
     }
-    let response = match timeout(timeout_dur, waiter).await {
+    let response = match timeout(request.timeout, waiter).await {
         Ok(Ok(resp)) => resp,
         Ok(Err(_)) => {
             sessions.cancel_reservation(&session_id);
@@ -393,9 +467,16 @@ pub async fn start_session(
             return Err(StartSessionError::Timeout);
         }
     };
-    let agent_window_id = match response.body {
+    let (agent_window_id, attached_tab_id) = match response.body {
         ResponseBody::Ok(v) => match serde_json::from_value::<SessionStartResult>(v) {
-            Ok(parsed) => parsed.agent_window_id,
+            Ok(parsed) => match validate_start_result(request.mode, parsed) {
+                Ok(target) => target,
+                Err(err) => {
+                    rollback_extension_session(&client, &session_id, request.timeout).await;
+                    sessions.cancel_reservation(&session_id);
+                    return Err(StartSessionError::ExtensionError(err));
+                }
+            },
             Err(_) => {
                 sessions.cancel_reservation(&session_id);
                 return Err(StartSessionError::ExtensionError(RpcError {
@@ -411,7 +492,7 @@ pub async fn start_session(
         }
     };
     let session = sessions
-        .commit_reservation(&session_id, agent_window_id)
+        .commit_reservation(&session_id, agent_window_id, attached_tab_id)
         .ok_or_else(|| {
             StartSessionError::ExtensionError(RpcError {
                 code: tabstride_protocol::ErrorCode::ProtocolError,

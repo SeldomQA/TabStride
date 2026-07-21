@@ -9,10 +9,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use tabstride_protocol::system::{BrowserStatusEntry, SessionStatusEntry};
-use tabstride_protocol::tools::ReturnFailure;
+use tabstride_protocol::tools::{ReturnFailure, SessionMode};
 use tabstride_protocol::{ErrorCode, Method};
 
 use crate::cli::ensure_daemon::ensure_daemon;
@@ -43,6 +43,41 @@ pub struct SessionStartArgs {
     /// are connected).
     #[arg(long)]
     pub browser: Option<String>,
+
+    /// Session isolation mode. `attach` controls one existing user tab in
+    /// place; `isolated` opens a dedicated Agent Window.
+    #[arg(long, value_enum, default_value_t = CliSessionMode::Isolated)]
+    pub mode: CliSessionMode,
+
+    /// Existing-tab selector for attach mode. Currently only `active` is
+    /// supported and means the active tab in the last-focused user window.
+    #[arg(long, value_enum, conflicts_with = "tab_id")]
+    pub tab: Option<CliTabTarget>,
+
+    /// Explicit existing Chrome tab id for attach mode.
+    #[arg(long, conflicts_with = "tab")]
+    pub tab_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub enum CliSessionMode {
+    #[default]
+    Isolated,
+    Attach,
+}
+
+impl From<CliSessionMode> for SessionMode {
+    fn from(value: CliSessionMode) -> Self {
+        match value {
+            CliSessionMode::Isolated => SessionMode::Isolated,
+            CliSessionMode::Attach => SessionMode::Attach,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CliTabTarget {
+    Active,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -60,6 +95,11 @@ pub struct SessionStopArgs {
 struct StartParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     browser_instance_id: Option<String>,
+    mode: SessionMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tab: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tab_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +108,8 @@ struct StartReply {
     browser_instance_id: String,
     #[serde(default)]
     agent_window_id: Option<i64>,
+    #[serde(default)]
+    attached_tab_id: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -113,34 +155,78 @@ pub fn dispatch(cmd: SessionCmd, format: Format) -> Result<(), CliError> {
 }
 
 fn run_start(sock: PathBuf, args: SessionStartArgs, format: Format) -> Result<(), CliError> {
+    validate_start_args(&args)?;
+    let mode = SessionMode::from(args.mode);
     let result: Result<StartReply, CliError> = call(
-        sock,
+        sock.clone(),
         Method::SessionStart,
         Some(StartParams {
             browser_instance_id: args.browser,
+            mode,
+            tab: args.tab.map(|_| "active".to_string()),
+            tab_id: args.tab_id,
         }),
         Duration::from_secs(30),
     );
     match result {
-        Ok(reply) => match format {
-            Format::Json => {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&serde_json::json!({
-                        "session_id": reply.session_id,
-                        "browser_instance_id": reply.browser_instance_id,
-                        "agent_window_id": reply.agent_window_id,
-                    }))
-                    .map_err(|e| CliError::Local(anyhow::anyhow!(e)))?
+        Ok(reply) => {
+            if !start_reply_matches_mode(mode, &reply) {
+                let _: Result<StopReply, CliError> = call(
+                    sock,
+                    Method::SessionStop,
+                    Some(StopParams {
+                        session_id: Some(reply.session_id.clone()),
+                        all: false,
+                    }),
+                    SESSION_STOP_IPC_TIMEOUT,
                 );
+                return Err(CliError::Local(anyhow::anyhow!(
+                    "the running TabStride service or extension does not support attach mode; restart `tabstride serve` and reload the extension"
+                )));
             }
-            Format::Human => {
-                println!("{}", reply.session_id);
+            match format {
+                Format::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "session_id": reply.session_id,
+                            "browser_instance_id": reply.browser_instance_id,
+                            "agent_window_id": reply.agent_window_id,
+                            "attached_tab_id": reply.attached_tab_id,
+                            "mode": mode,
+                        }))
+                        .map_err(|e| CliError::Local(anyhow::anyhow!(e)))?
+                    );
+                }
+                Format::Human => {
+                    println!("{}", reply.session_id);
+                }
             }
-        },
+        }
         Err(err) => return Err(handle_start_error(err, format)),
     }
     Ok(())
+}
+
+fn start_reply_matches_mode(mode: SessionMode, reply: &StartReply) -> bool {
+    match mode {
+        SessionMode::Isolated => reply.agent_window_id.is_some() && reply.attached_tab_id.is_none(),
+        SessionMode::Attach => reply.agent_window_id.is_none() && reply.attached_tab_id.is_some(),
+    }
+}
+
+fn validate_start_args(args: &SessionStartArgs) -> Result<(), CliError> {
+    match args.mode {
+        CliSessionMode::Isolated if args.tab.is_some() || args.tab_id.is_some() => Err(
+            CliError::Local(anyhow::anyhow!("--tab/--tab-id require `--mode attach`")),
+        ),
+        CliSessionMode::Attach if args.tab.is_none() && args.tab_id.is_none() => {
+            Err(CliError::Local(anyhow::anyhow!(
+                "attach mode requires `--tab active` or `--tab-id <ID>`"
+            )))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Render a `session.start` failure (review I3).
@@ -367,7 +453,7 @@ fn run_list(sock: PathBuf, format: Format) -> Result<(), CliError> {
                 println!("(no active sessions)");
                 return Ok(());
             }
-            let headers = ("SESSION", "BROWSER", "AGENT WINDOW");
+            let headers = ("SESSION", "BROWSER", "MODE", "TARGET");
             let session_w = reply
                 .sessions
                 .iter()
@@ -382,18 +468,29 @@ fn run_list(sock: PathBuf, format: Format) -> Result<(), CliError> {
                 .max()
                 .unwrap_or(0)
                 .max(headers.1.len());
+            let mode_w = "isolated".len().max(headers.2.len());
             println!(
-                "{:<session_w$}  {:<browser_w$}  {}",
-                headers.0, headers.1, headers.2,
+                "{:<session_w$}  {:<browser_w$}  {:<mode_w$}  {}",
+                headers.0, headers.1, headers.2, headers.3,
             );
             for s in &reply.sessions {
-                let window = s
-                    .agent_window_id
-                    .map(|w| w.to_string())
-                    .unwrap_or_else(|| "-".into());
+                let mode = match s.mode {
+                    SessionMode::Isolated => "isolated",
+                    SessionMode::Attach => "attach",
+                };
+                let target = match s.mode {
+                    SessionMode::Attach => s
+                        .attached_tab_id
+                        .map(|id| format!("tab:{id}"))
+                        .unwrap_or_else(|| "tab:-".into()),
+                    SessionMode::Isolated => s
+                        .agent_window_id
+                        .map(|id| format!("window:{id}"))
+                        .unwrap_or_else(|| "window:-".into()),
+                };
                 println!(
-                    "{:<session_w$}  {:<browser_w$}  {}",
-                    s.session_id, s.browser_instance_id, window,
+                    "{:<session_w$}  {:<browser_w$}  {:<mode_w$}  {}",
+                    s.session_id, s.browser_instance_id, mode, target,
                 );
             }
         }
@@ -446,6 +543,27 @@ mod i3_tests {
     use super::*;
     use crate::cli::error::render_human_to_string;
     use tabstride_protocol::RpcError;
+
+    #[test]
+    fn start_reply_target_must_match_requested_mode() {
+        let isolated = StartReply {
+            session_id: "aaaa".into(),
+            browser_instance_id: "browser".into(),
+            agent_window_id: Some(9),
+            attached_tab_id: None,
+        };
+        assert!(start_reply_matches_mode(SessionMode::Isolated, &isolated));
+        assert!(!start_reply_matches_mode(SessionMode::Attach, &isolated));
+
+        let attached = StartReply {
+            session_id: "bbbb".into(),
+            browser_instance_id: "browser".into(),
+            agent_window_id: None,
+            attached_tab_id: Some(77),
+        };
+        assert!(start_reply_matches_mode(SessionMode::Attach, &attached));
+        assert!(!start_reply_matches_mode(SessionMode::Isolated, &attached));
+    }
 
     /// Review I3 contract: the centralised `summary:` and `hint:` lines
     /// come from `render_error::info_for(MultipleBrowsersOnline)` and

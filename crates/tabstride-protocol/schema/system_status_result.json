@@ -119,6 +119,13 @@
         }
       }
     },
+    "SessionMode": {
+      "type": "string",
+      "enum": [
+        "isolated",
+        "attach"
+      ]
+    },
     "SessionStatusEntry": {
       "description": "Snapshot of a single live session.",
       "type": "object",
@@ -135,6 +142,13 @@
           ],
           "format": "int64"
         },
+        "attached_tab_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
         "browser_instance_id": {
           "type": "string"
         },
@@ -142,6 +156,14 @@
           "description": "Unix epoch milliseconds.",
           "type": "integer",
           "format": "int64"
+        },
+        "mode": {
+          "default": "isolated",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SessionMode"
+            }
+          ]
         },
         "session_id": {
           "type": "string"

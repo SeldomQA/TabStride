@@ -12,8 +12,39 @@
         "null"
       ]
     },
+    "mode": {
+      "default": "isolated",
+      "allOf": [
+        {
+          "$ref": "#/definitions/SessionMode"
+        }
+      ]
+    },
     "session_id": {
       "type": "string"
+    },
+    "tab": {
+      "description": "`active` for the last-focused user window. Kept separate from `tab_id` so future selectors can be added without overloading ids.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tab_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    }
+  },
+  "definitions": {
+    "SessionMode": {
+      "type": "string",
+      "enum": [
+        "isolated",
+        "attach"
+      ]
     }
   }
 }

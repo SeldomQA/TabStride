@@ -241,9 +241,13 @@ export async function handleTabList(
   // (design §6: cross-session isolation). Build a set up-front so the
   // per-tab classification is O(1).
   const otherAgentWindowIds = new Set<number>();
+  const otherAttachedTabIds = new Set<number>();
   for (const s of manager.list()) {
     if (s.sessionId !== params.session_id) {
-      otherAgentWindowIds.add(s.agentWindowId);
+      if (s.mode === "isolated") otherAgentWindowIds.add(s.agentWindowId);
+      if (s.mode === "attach" && s.attachedTabId !== undefined) {
+        otherAttachedTabIds.add(s.attachedTabId);
+      }
     }
   }
   const myAgentWindowId = ctx.agentWindowId;
@@ -252,9 +256,11 @@ export async function handleTabList(
   const tabs: TabInfo[] = [];
   for (const t of allTabs) {
     if (typeof t.id !== "number") continue;
+    if (otherAttachedTabIds.has(t.id)) continue;
     const winId = typeof t.windowId === "number" ? t.windowId : -1;
     if (otherAgentWindowIds.has(winId)) continue;
-    const tabScope: "user" | "agent" = winId === myAgentWindowId ? "agent" : "user";
+    const isAgent = ctx.mode === "attach" ? t.id === ctx.attachedTabId : winId === myAgentWindowId;
+    const tabScope: "user" | "agent" = isAgent ? "agent" : "user";
     if (scope === "user" && tabScope !== "user") continue;
     if (scope === "agent" && tabScope !== "agent") continue;
     tabs.push({
@@ -410,6 +416,13 @@ export async function handleTabCreate(
   const ctxOrErr = lookupSession(manager, params, "tab_create");
   if (isRpcError(ctxOrErr)) return ctxOrErr;
   const ctx = ctxOrErr;
+  if (ctx.mode === "attach") {
+    return {
+      code: "permission_denied",
+      message: "tab_create is unavailable in attach mode",
+      data: { reason: "attached_tab_scope" },
+    };
+  }
   const ab = aborted(deps.signal, "tab_create");
   if (ab) return ab;
 
@@ -467,6 +480,14 @@ async function authoriseAgentTab(
       `${toolName}: tab ${tabId} is borrowed by session ${otherBorrower}`,
     );
   }
+  if (ctx.mode === "attach") {
+    if (tabId === ctx.attachedTabId) return tab;
+    return rpcError(
+      "permission_denied",
+      "attached_tab_scope",
+      `${toolName}: tab ${tabId} is outside the attach lease`,
+    );
+  }
   if (tab.windowId === ctx.agentWindowId) {
     return tab;
   }
@@ -489,6 +510,13 @@ export async function handleTabClose(
   const ctxOrErr = lookupSession(manager, params, "tab_close");
   if (isRpcError(ctxOrErr)) return ctxOrErr;
   const ctx = ctxOrErr;
+  if (ctx.mode === "attach") {
+    return {
+      code: "permission_denied",
+      message: "tab_close cannot close a user tab leased by attach mode",
+      data: { reason: "attached_tab_scope" },
+    };
+  }
   const bad = validatePositiveInt("tab_id", params.tab_id);
   if (bad) return bad;
   const ab = aborted(deps.signal, "tab_close");
@@ -751,6 +779,13 @@ export async function handleTabBorrow(
   const ctxOrErr = lookupSession(manager, params, "tab_borrow");
   if (isRpcError(ctxOrErr)) return ctxOrErr;
   const ctx = ctxOrErr;
+  if (ctx.mode === "attach") {
+    return {
+      code: "permission_denied",
+      message: "tab_borrow is unavailable in attach mode",
+      data: { reason: "attached_tab_scope" },
+    };
+  }
   const bad = validatePositiveInt("tab_id", params.tab_id);
   if (bad) return bad;
   if (aborted(deps.signal, "tab_borrow")) {
@@ -991,6 +1026,13 @@ export async function handleTabReturn(
   const ctxOrErr = lookupSession(manager, params, "tab_return");
   if (isRpcError(ctxOrErr)) return ctxOrErr;
   const ctx = ctxOrErr;
+  if (ctx.mode === "attach") {
+    return {
+      code: "permission_denied",
+      message: "tab_return is unavailable in attach mode",
+      data: { reason: "attached_tab_scope" },
+    };
+  }
   const bad = validatePositiveInt("tab_id", params.tab_id);
   if (bad) return bad;
   if (aborted(deps.signal, "tab_return")) {

@@ -40,8 +40,8 @@ use tracing::{debug, info, warn};
 use super::abort::AbortRegistry;
 use super::queue::{DEFAULT_TOOL_TIMEOUT, DispatchError};
 use super::sessions::{
-    SessionId, StartSessionError, StopSessionError, snapshot_status_entries, start_session,
-    stop_session,
+    SessionId, StartSessionError, StartSessionRequest, StopSessionError, snapshot_status_entries,
+    start_session, stop_session,
 };
 use super::state::{DAEMON_VERSION, DaemonState, PROTOCOL_VERSION};
 
@@ -629,6 +629,12 @@ fn tool_dispatch_timeout(params: &Value) -> Result<Duration, RpcError> {
 struct CliSessionStartParams {
     #[serde(default)]
     pub browser_instance_id: Option<String>,
+    #[serde(default)]
+    pub mode: tabstride_protocol::tools::SessionMode,
+    #[serde(default)]
+    pub tab: Option<String>,
+    #[serde(default)]
+    pub tab_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -637,6 +643,9 @@ struct CliSessionStartResult {
     pub browser_instance_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_window_id: Option<i64>,
+    pub mode: tabstride_protocol::tools::SessionMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attached_tab_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -720,6 +729,9 @@ async fn handle_session_start(state: &Arc<DaemonState>, params: Value) -> Result
     let params: CliSessionStartParams = if params.is_null() {
         CliSessionStartParams {
             browser_instance_id: None,
+            mode: tabstride_protocol::tools::SessionMode::Isolated,
+            tab: None,
+            tab_id: None,
         }
     } else {
         serde_json::from_value(params).map_err(|err| RpcError {
@@ -732,9 +744,14 @@ async fn handle_session_start(state: &Arc<DaemonState>, params: Value) -> Result
         &state.browsers,
         &state.sessions,
         &state.tool_queues,
-        params.browser_instance_id.as_deref(),
-        state.config.extension_connect_wait,
-        DEFAULT_RPC_TIMEOUT,
+        StartSessionRequest {
+            requested_browser: params.browser_instance_id.as_deref(),
+            mode: params.mode,
+            tab: params.tab.as_deref(),
+            tab_id: params.tab_id,
+            connect_wait: state.config.extension_connect_wait,
+            timeout: DEFAULT_RPC_TIMEOUT,
+        },
     )
     .await
     {
@@ -743,6 +760,8 @@ async fn handle_session_start(state: &Arc<DaemonState>, params: Value) -> Result
                 session_id: session.id.0.clone(),
                 browser_instance_id: session.browser_id.0.clone(),
                 agent_window_id: session.agent_window_id,
+                mode: session.mode,
+                attached_tab_id: session.attached_tab_id,
             };
             Ok(serde_json::to_value(result).unwrap_or(Value::Null))
         }

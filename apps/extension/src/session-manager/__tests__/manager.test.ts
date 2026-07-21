@@ -77,6 +77,32 @@ describe("SessionManager", () => {
     expect(sm.has("aa11")).toBe(false);
   });
 
+  it("attaches one existing tab without creating, moving, or closing it", async () => {
+    const aw = fakeAgentWindow();
+    const sm = new SessionManager({ agentWindow: aw, now: () => 1700000000000 });
+    const ctx = sm.startAttached("aa11", 77, 9);
+
+    expect(ctx).toMatchObject({
+      sessionId: "aa11",
+      mode: "attach",
+      attachedTabId: 77,
+      agentWindowId: 9,
+    });
+    expect(sm.findByAttachedTabId(77)).toBe(ctx);
+    expect(sm.findByWindowId(9)).toBeNull();
+    expect(aw.createMock).not.toHaveBeenCalled();
+
+    await sm.stop("aa11");
+    expect(aw.removeMock).not.toHaveBeenCalled();
+    expect(sm.findByAttachedTabId(77)).toBeNull();
+  });
+
+  it("prevents two sessions from attaching the same tab", () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow() });
+    sm.startAttached("aa11", 77, 9);
+    expect(() => sm.startAttached("bb22", 77, 9)).toThrow(/already attached by session aa11/);
+  });
+
   it("stopAll() drops every session and returns their ids", async () => {
     const aw = fakeAgentWindow();
     const sm = new SessionManager({ agentWindow: aw });

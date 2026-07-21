@@ -139,6 +139,7 @@ where
                     ResponseBody::Ok(
                         serde_json::to_value(SessionStartResult {
                             agent_window_id: Some(id),
+                            attached_tab_id: None,
                         })
                         .unwrap(),
                     )
