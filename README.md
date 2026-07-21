@@ -16,15 +16,15 @@ TabStride lets AI test the browser tab you already have open.
 
 **TabStride** connects Cursor, Claude Code, Codex, OpenClaw, CodeBuddy, WorkBuddy, Pi, Hermes Agent, and other shell-capable AI agents to your already logged-in browser.
 
-Need the agent to touch a tab you already have open? It must borrow that tab explicitly, return it when the task is done, and leave the rest of your browser alone.
+Need the agent to control the current tab in place? Use `tabstride session start --mode attach --tab active`; it creates no window, moves no tab, and leaves sibling tabs inaccessible.
 
 
 ## TabStride Advantages
 
 - **Reuse real login state**: Agents can work with sites you are already signed
   into, without separate test accounts.
-- **Keep working uninterrupted**: browser tasks run in a separate, visible
-  Agent Window, so you can keep using your own browser.
+- **Two safe modes**: isolated sessions use a separate, visible Agent Window;
+  attach sessions lease exactly one explicitly selected existing tab.
 - **Support any Agent**: any Agent that can call a shell can use TabStride
   through the `tabstride` CLI, with no lock-in to a specific model, Agent framework, or
   harness.
@@ -146,6 +146,29 @@ Run business commands from another terminal. If the service is absent, they fail
 tell you to run `tabstride serve`; they never create a background process. `tabstride status` and
 `tabstride doctor` remain read-only diagnostics and never start the service.
 
+### Choose a session mode
+
+TabStride supports two session modes:
+
+- **Isolated (default)** — `tabstride session start` opens a dedicated Agent Window. Use this when
+  the agent should work separately from your current browsing.
+- **Attach** — `tabstride session start --mode attach --tab active` leases the active tab in your
+  current Chrome window in place. You can also target a known tab with `--tab-id <ID>`.
+
+For example, keep `tabstride serve` running in one terminal and run this lifecycle in another:
+
+```bash
+session_id=$(tabstride session start --mode attach --tab active)
+tabstride snapshot --session "$session_id"
+# navigate, click, fill, and other business commands always use the same session id
+tabstride session stop "$session_id"
+```
+
+Attach mode controls exactly one existing tab. It does not create a window, move the tab, expose
+sibling tabs, or permit tab-management commands such as `tab create`, `tab close`, `tab borrow`,
+and `tab return`. Stopping the session detaches browser control and removes the control overlay,
+while leaving the user's tab and window open. Always stop the session, including after errors.
+
 Business requests are logged without their payloads:
 
 ```text
@@ -184,8 +207,8 @@ flowchart TB
   Agent -->|"shell: tabstride ..."| CLI
   CLI -->|"local IPC"| Daemon
   Daemon -->|"WebSocket on 127.0.0.1"| Extension
-  Extension -->|"automates"| AgentWindow
-  Extension -.->|"borrow tab only when asked"| UserWindows
+  Extension -->|"isolated: automate"| AgentWindow
+  Extension -.->|"attach: lease one tab in place"| UserWindows
 
   style AgentWindow fill:#fff4e6,stroke:#f59e0b,stroke-width:2px,color:#111827
   style UserWindows fill:#f8fafc,stroke:#cbd5e1,color:#334155
@@ -193,7 +216,8 @@ flowchart TB
 
 The agent never talks to the browser directly. It asks the `tabstride` CLI to perform a
 browser task; the local daemon routes that request to the extension; the
-extension runs it in an Agent Window.
+extension runs it in an Agent Window by default, or controls one explicitly
+leased existing tab in place when the session uses attach mode.
 
 ## For Developers
 

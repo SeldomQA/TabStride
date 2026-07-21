@@ -14,12 +14,12 @@
 
 **TabStride** 把 Cursor、Claude Code、Codex、OpenClaw、CodeBuddy、WorkBuddy、Pi、Hermes Agent 等支持 Shell 的 AI Agent 连接到你已登录的浏览器。
 
-需要 Agent 操作你已打开的标签页？必须显式借用该标签，任务结束后归还，其余浏览器窗口不受影响。
+需要 Agent 原地操作当前标签页？使用 `tabstride session start --mode attach --tab active`；它不会新建窗口、移动标签或影响同窗口的其他标签。
 
 ## TabStride 的优势
 
 - **复用真实登录态**：Agent 可以操作你已经登录的网站，不需要额外测试账号。
-- **不中断你的工作**：浏览器任务在独立可见的 Agent Window 中运行，不影响你继续使用自己的浏览器。
+- **两种安全模式**：默认使用独立可见的 Agent Window；attach 模式只租用你明确指定的现有标签页。
 - **支持任意 Agent**：只要 Agent 能调用 Shell，就可以通过 `tabstride` CLI 使用 TabStride，不绑定特定模型、Agent 框架或 harness。
 - **内置 human-in-loop**：遇到 captcha、登录、确认弹窗等必须由人处理的步骤时，Agent 可以主动请求你接管，完成后再继续任务。
 
@@ -125,6 +125,29 @@ tabstride serve
 业务命令在另一个终端中运行。服务未启动时，命令会立即失败并提示运行 `tabstride serve`，不会在后台
 悄悄创建 daemon。`tabstride status` 和 `tabstride doctor` 保留为只读诊断命令，也不会启动服务。
 
+### 选择 Session 模式
+
+TabStride 支持两种 Session 模式：
+
+- **Isolated（默认）**：`tabstride session start` 会打开一个独立的 Agent Window，适合让 Agent
+  在不影响当前浏览内容的环境中工作。
+- **Attach**：`tabstride session start --mode attach --tab active` 会原地租用当前 Chrome 窗口的
+  活动标签页。已知标签页 ID 时，也可以使用 `--tab-id <ID>`。
+
+例如，在一个终端中保持 `tabstride serve` 运行，在另一个终端中执行完整生命周期：
+
+```bash
+session_id=$(tabstride session start --mode attach --tab active)
+tabstride snapshot --session "$session_id"
+# navigate、click、fill 等业务命令始终使用同一个 session id
+tabstride session stop "$session_id"
+```
+
+Attach 模式只控制一个明确指定的现有标签页：不会创建新窗口、移动标签页、访问同窗口的其他标签页，
+也不允许 `tab create`、`tab close`、`tab borrow`、`tab return` 等标签管理命令。停止 Session 时会
+解除浏览器控制并隐藏“Agent 正在控制”提示，但保留用户原有的标签页和窗口。即使执行过程中出错，也必须
+停止 Session。
+
 业务请求会记录日志，但不会记录请求内容：
 
 ```text
@@ -162,14 +185,14 @@ flowchart TB
   Agent -->|"shell: tabstride ..."| CLI
   CLI -->|"本地 IPC"| Daemon
   Daemon -->|"127.0.0.1 WebSocket"| Extension
-  Extension -->|"自动化"| AgentWindow
-  Extension -.->|"仅在请求时借用标签"| UserWindows
+  Extension -->|"isolated：自动化"| AgentWindow
+  Extension -.->|"attach：原地租用一个标签"| UserWindows
 
   style AgentWindow fill:#fff4e6,stroke:#f59e0b,stroke-width:2px,color:#111827
   style UserWindows fill:#f8fafc,stroke:#cbd5e1,color:#334155
 ```
 
-Agent 不直接与浏览器通信。它通过 `tabstride` CLI 下发浏览器任务；本地 daemon 把请求路由到扩展；扩展在 Agent Window 中执行。
+Agent 不直接与浏览器通信。它通过 `tabstride` CLI 下发浏览器任务；本地 daemon 把请求路由到扩展；扩展默认在 Agent Window 中执行，也可以通过 attach 模式原地控制一个明确授权的现有标签。
 
 ## 面向开发者
 
