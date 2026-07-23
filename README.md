@@ -169,6 +169,40 @@ sibling tabs, or permit tab-management commands such as `tab create`, `tab close
 and `tab return`. Stopping the session detaches browser control and removes the control overlay,
 while leaving the user's tab and window open. Always stop the session, including after errors.
 
+### Persistent Agent client
+
+Agent harnesses that can keep a child process alive should use `tabstride client`. It performs one
+authenticated WebSocket handshake with `tabstride serve`, then accepts newline-delimited protocol
+requests on stdin and writes correlated responses to stdout:
+
+```text
+{"id":"start-1","method":"session.start","params":{"mode":"attach","tab":"active"}}
+{"id":"snap-1","method":"tool.snapshot","params":{"session_id":"abcd"}}
+{"id":"stop-1","method":"session.stop","params":{"session_id":"abcd"}}
+```
+
+Requests may be pipelined and cancelled by request id. The connection sends heartbeats, rejects
+duplicate in-flight ids, and cleans up requests and sessions it created when the client disconnects.
+The `/agent` endpoint listens only on localhost and requires the random capability stored in the
+user-only daemon info file; `tabstride client` handles this handshake automatically.
+
+### Batch repeatable work with Flow
+
+Use Flow when the complete sequence is known up front. The CLI validates a YAML file locally, then
+submits every step to the service in one `flow.run` request:
+
+```bash
+tabstride flow validate examples/flows/todomvc.yaml
+tabstride flow run examples/flows/todomvc.yaml --session "$session_id" --var task="write code"
+```
+
+Flow v1 supports `navigate`, `click`, `fill`, `press`, `snapshot`, and daemon-side `wait_ms` steps.
+Steps run in order through the same session queue as individual CLI commands; the first failure
+stops the flow and reports the failed step plus completed-step timings. A total `timeout` and each
+tool's `timeout_ms` are independent, and Ctrl+C cancels the active step and the remaining flow.
+Targets use exactly one of `css` or `ref`; semantic locators and assertions belong to the next
+reliable-execution phase.
+
 Business requests are logged without their payloads:
 
 ```text
