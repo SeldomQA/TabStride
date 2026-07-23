@@ -466,6 +466,21 @@ pub struct HandshakeResult {
     pub min_compatible_protocol: Option<String>,
 }
 
+/// Handshake sent by a persistent Agent client on the `/agent` WebSocket.
+/// Agent clients do not impersonate browser extensions and therefore carry
+/// no browser instance or extension identity.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AgentHandshakeParams {
+    pub client: String,
+    #[schemars(with = "String")]
+    pub version: Version,
+    pub protocol_version: String,
+    /// Per-serve-instance secret read from the user-only daemon info file.
+    pub token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_compatible_protocol: Option<String>,
+}
+
 #[cfg(test)]
 mod handshake_payload_tests {
     use super::*;

@@ -24,6 +24,9 @@ pub enum Method {
     #[serde(rename = "browser.list")]
     BrowserList,
 
+    #[serde(rename = "flow.run")]
+    FlowRun,
+
     #[serde(rename = "tool.session_start")]
     ToolSessionStart,
     #[serde(rename = "tool.session_stop")]
@@ -92,6 +95,7 @@ impl Method {
             Method::SessionStopAll => "session.stop_all",
             Method::SessionList => "session.list",
             Method::BrowserList => "browser.list",
+            Method::FlowRun => "flow.run",
             Method::ToolSessionStart => "tool.session_start",
             Method::ToolSessionStop => "tool.session_stop",
             Method::ToolTabList => "tool.tab_list",
@@ -162,6 +166,10 @@ impl Method {
             | Method::ToolPress
             | Method::ToolSelect
             | Method::ToolEvaluate => true,
+
+            // A flow may contain mutating actions. The runtime applies the
+            // finer-grained check again for every individual step.
+            Method::FlowRun => true,
 
             // Read-only tool calls — transparent.
             Method::ToolTabList

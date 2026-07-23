@@ -5,6 +5,7 @@ use std::time::Duration;
 pub mod browser_wait;
 pub mod browsers;
 pub mod business_rpc;
+pub mod client;
 pub mod console;
 pub mod daemon;
 pub mod dialogs;
@@ -12,6 +13,7 @@ pub mod doctor;
 pub mod ensure_daemon;
 pub mod error;
 pub mod evaluate;
+pub mod flow;
 pub mod get_html;
 pub mod human_loop;
 pub mod install_skill;
@@ -29,9 +31,11 @@ pub mod waits;
 
 use clap::{Args, Parser, Subcommand};
 
+use crate::cli::client::ClientArgs;
 use crate::cli::console::ConsoleArgs;
 use crate::cli::daemon::{DaemonCmd, ServeArgs};
 use crate::cli::evaluate::EvaluateArgs;
+use crate::cli::flow::FlowCmd;
 use crate::cli::get_html::GetHtmlArgs;
 use crate::cli::human_loop::RequestHelpArgs;
 use crate::cli::install_skill::InstallSkillArgs;
@@ -84,6 +88,13 @@ pub struct Cli {
 pub enum Command {
     /// Run the TabStride service in the foreground until Ctrl+C.
     Serve(ServeArgs),
+
+    /// Keep one native IPC connection open and proxy JSON request lines.
+    Client(ClientArgs),
+
+    /// Validate or run a declarative browser flow.
+    #[command(subcommand)]
+    Flow(FlowCmd),
 
     /// Manage the local `tabstride` daemon process.
     #[command(subcommand, hide = true)]

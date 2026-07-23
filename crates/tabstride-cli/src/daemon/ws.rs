@@ -122,6 +122,8 @@ async fn handle_connection(
     peer: SocketAddr,
 ) -> anyhow::Result<()> {
     let allow_any = state.config.allow_any_origin;
+    let agent_connection = std::sync::Arc::new(std::sync::Mutex::new(false));
+    let agent_connection_for_cb = std::sync::Arc::clone(&agent_connection);
     let captured_origin: std::sync::Arc<std::sync::Mutex<Option<String>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
     let captured_origin_for_cb = std::sync::Arc::clone(&captured_origin);
@@ -133,7 +135,20 @@ async fn handle_connection(
             .and_then(|v| v.to_str().ok())
             .unwrap_or_default()
             .to_string();
-        if !origin_allowed(&origin, allow_any) {
+        let is_agent = req.uri().path() == "/agent";
+        if req.uri().path() != "/" && !is_agent {
+            let mut err = ErrorResponse::new(Some("unknown websocket endpoint".to_string()));
+            *err.status_mut() = StatusCode::NOT_FOUND;
+            return Err(err);
+        }
+        if is_agent && !origin.is_empty() && !allow_any {
+            let mut err = ErrorResponse::new(Some(
+                "agent websocket must be a native localhost client".to_string(),
+            ));
+            *err.status_mut() = StatusCode::FORBIDDEN;
+            return Err(err);
+        }
+        if !is_agent && !origin_allowed(&origin, allow_any) {
             warn!(?origin, "rejecting WS upgrade with disallowed origin");
             let mut err = ErrorResponse::new(Some(
                 "Origin not in chrome-extension allow-list".to_string(),
@@ -141,6 +156,7 @@ async fn handle_connection(
             *err.status_mut() = StatusCode::FORBIDDEN;
             return Err(err);
         }
+        *agent_connection_for_cb.lock().unwrap() = is_agent;
         *captured_origin_for_cb.lock().unwrap() = Some(origin);
         let mut resp = response;
         resp.headers_mut().append(
@@ -160,7 +176,19 @@ async fn handle_connection(
 
     let origin = captured_origin.lock().unwrap().clone().unwrap_or_default();
     debug!(?peer, %origin, "ws connection upgraded");
-    drive_connection(state, ws).await
+    if *agent_connection.lock().unwrap() {
+        let status = super::ipc::DaemonStatus {
+            started_at: std::time::Instant::now(),
+            ws_port: state.config.ws_port,
+            sock_path: std::path::PathBuf::new(),
+            daemon_version: super::state::DAEMON_VERSION,
+            protocol_version: super::state::PROTOCOL_VERSION,
+        };
+        let handler = super::ipc::full_handler(status, Arc::clone(&state));
+        super::agent_ws::drive_connection(handler, &state.agent_token, ws, peer).await
+    } else {
+        drive_connection(state, ws).await
+    }
 }
 
 /// Hard cap on how long the daemon will wait for a freshly-upgraded

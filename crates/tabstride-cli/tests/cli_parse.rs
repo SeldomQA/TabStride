@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use tabstride::cli::daemon::{DaemonCmd, parse_duration};
+use tabstride::cli::flow::FlowCmd;
 use tabstride::cli::navigate::NavigateCmd;
 use tabstride::cli::session::{CliSessionMode, CliTabTarget, SessionSub};
 use tabstride::daemon::DaemonConfig;
@@ -48,6 +49,37 @@ fn parses_top_level_serve_with_defaults_and_flags() {
     };
     assert_eq!(args.resolved_port(), 52900);
     assert_eq!(args.resolved_session_idle(), Duration::from_secs(30));
+}
+
+#[test]
+fn parses_persistent_native_client_timeout() {
+    let cli = parse(&["tabstride", "client", "--timeout", "2m"]);
+    let Command::Client(args) = cli.command else {
+        panic!("expected client command");
+    };
+    assert_eq!(args.timeout, Duration::from_secs(120));
+}
+
+#[test]
+fn parses_flow_validate_and_run() {
+    let cli = parse(&["tabstride", "flow", "validate", "demo.yaml"]);
+    assert!(matches!(cli.command, Command::Flow(FlowCmd::Validate(_))));
+
+    let cli = parse(&[
+        "tabstride",
+        "flow",
+        "run",
+        "demo.yaml",
+        "--session",
+        "abcd",
+        "--var",
+        "task=write-code",
+    ]);
+    let Command::Flow(FlowCmd::Run(args)) = cli.command else {
+        panic!("expected flow run command");
+    };
+    assert_eq!(args.session, "abcd");
+    assert_eq!(args.variables, vec![("task".into(), "write-code".into())]);
 }
 
 #[test]

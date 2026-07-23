@@ -236,6 +236,9 @@ pub fn full_handler(status: DaemonStatus, state: Arc<DaemonState>) -> RpcHandler
                     Ok(v) => ResponseBody::Ok(v),
                     Err(e) => ResponseBody::Err(e),
                 },
+                Method::FlowRun => {
+                    super::flow_runtime::handle_flow_run(&state, rpc_id.clone(), params).await
+                }
                 Method::ToolTabList
                 | Method::ToolTabCreate
                 | Method::ToolTabClose
@@ -387,7 +390,7 @@ fn should_log_request(method: &Method) -> bool {
 /// `handle_cancel`). The same entry covers the in-flight phase too,
 /// so the worker can short-circuit via its cancel token instead of
 /// hand-rolling a second mechanism.
-async fn handle_tool_dispatch(
+pub(super) async fn handle_tool_dispatch(
     state: &Arc<DaemonState>,
     cli_rpc_id: RpcId,
     method: Method,
@@ -458,7 +461,7 @@ pub const MAX_WAIT_MS: u64 = 5 * 60 * 1_000;
 /// through `handle_tool_dispatch` / `tool_queues`: the sleep is
 /// answered entirely on this side of the WS link, so no extension
 /// hop and no session id required.
-async fn handle_wait_ms(
+pub(super) async fn handle_wait_ms(
     registry: &Arc<AbortRegistry>,
     rpc_id: RpcId,
     params: Value,
@@ -550,9 +553,16 @@ fn handle_cancel(state: &Arc<DaemonState>, params: Value) -> ResponseBody {
             });
         }
     };
-    let local = state.abort_registry.cancel(&params.rpc_id);
+    let cancelled = cancel_rpc(state, &params.rpc_id);
+    ResponseBody::Ok(serde_json::to_value(CancelResult { cancelled }).unwrap_or(Value::Null))
+}
+
+/// Cancel a daemon-local runner or a queued/forwarded browser tool.
+/// Flow uses this same path to propagate cancellation to its active child step.
+pub(super) fn cancel_rpc(state: &Arc<DaemonState>, rpc_id: &RpcId) -> bool {
+    let local = state.abort_registry.cancel(rpc_id);
     let mut cancelled = local;
-    if !local && let Some(snap) = state.tool_inflight.cancel(&params.rpc_id) {
+    if !local && let Some(snap) = state.tool_inflight.cancel(rpc_id) {
         cancelled = true;
         // Forward the WS-side cancel only when the worker has
         // already promoted the entry to "forwarded"; queued entries
@@ -563,7 +573,7 @@ fn handle_cancel(state: &Arc<DaemonState>, params: Value) -> ResponseBody {
                 super::cancel_forward::forward_cancel_to_browser(state, &browser_id, &ws_rpc_id)
         {
             warn!(
-                cli_rpc_id = %params.rpc_id,
+                cli_rpc_id = %rpc_id,
                 browser = %browser_id,
                 ws_rpc_id = %ws_rpc_id,
                 %err,
@@ -571,7 +581,7 @@ fn handle_cancel(state: &Arc<DaemonState>, params: Value) -> ResponseBody {
             );
         }
     }
-    ResponseBody::Ok(serde_json::to_value(CancelResult { cancelled }).unwrap_or(Value::Null))
+    cancelled
 }
 
 /// Test-only re-export of the cancel handler: the system-only handler

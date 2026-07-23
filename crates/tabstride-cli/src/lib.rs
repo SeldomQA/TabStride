@@ -1,5 +1,6 @@
 //! `tabstride` CLI internals shared with binary and integration tests.
 
+pub mod agent_client;
 pub mod cli;
 pub mod daemon;
 pub mod ipc_client;

@@ -9,7 +9,9 @@ use tabstride_protocol::system::{
     StatusResult,
 };
 use tabstride_protocol::tools::*;
-use tabstride_protocol::{CancelParams, CancelResult};
+use tabstride_protocol::{
+    CancelParams, CancelResult, FlowDefinition, FlowRunParams, FlowRunResult,
+};
 
 fn write_schema(name: &str, schema: impl serde::Serialize) {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("schema");
@@ -97,4 +99,8 @@ fn main() {
     dump!(WaitMsResult, "tool_wait_ms_result");
     dump!(RequestHelpParams, "tool_request_help_params");
     dump!(RequestHelpResult, "tool_request_help_result");
+
+    dump!(FlowDefinition, "flow_definition");
+    dump!(FlowRunParams, "flow_run_params");
+    dump!(FlowRunResult, "flow_run_result");
 }

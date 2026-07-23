@@ -223,12 +223,13 @@ pub fn run_foreground(cfg: DaemonConfig) -> Result<()> {
             .with_context(|| format!("bind WS server on {ws_addr}"))?;
         let ws_port = ws_handle.local_addr.port();
 
-        let info = daemon_info::DaemonInfo::now(
+        let mut info = daemon_info::DaemonInfo::now(
             std::process::id(),
             sock_path.clone(),
             ws_port,
             env!("CARGO_PKG_VERSION"),
         );
+        info.agent_token.clone_from(&state.agent_token);
         daemon_info::write(&info).context("write daemon.json")?;
         info!(
             version = env!("CARGO_PKG_VERSION"),

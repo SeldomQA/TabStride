@@ -19,6 +19,9 @@ semver = { workspace = true }
 schemars = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+serde_yaml = { workspace = true }
+
 [[bin]]
 name = "dump-schema"
 path = "src/bin/dump-schema.rs"

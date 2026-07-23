@@ -23,7 +23,8 @@ use tabstride_protocol::tools::{
     SelectResult, SessionStartParams, SessionStartResult, WaitUntil,
 };
 use tabstride_protocol::{
-    BrowserPeerInfo, ErrorCode, Frame, Method, RequestFrame, ResponseBody, ResponseFrame, RpcError,
+    BrowserPeerInfo, ErrorCode, FlowDefinition, FlowRunParams, FlowRunResult, Frame, Method,
+    RequestFrame, ResponseBody, ResponseFrame, RpcError,
 };
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -227,6 +228,69 @@ async fn navigate_round_trips_wait_until_and_reached() {
     assert_eq!(
         result.final_url.as_deref(),
         Some("https://example.com/landing")
+    );
+    handle.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn five_step_flow_reuses_the_existing_tool_queue() {
+    let (handle, sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    let _ = do_handshake(&mut ws).await;
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen_by_extension = Arc::clone(&seen);
+    run_extension(ws, move |req| {
+        seen_by_extension
+            .lock()
+            .unwrap()
+            .push(req.method.as_str().to_string());
+        match req.method {
+            Method::ToolNavigate => ResponseBody::Ok(json!({
+                "tab_id": 17, "url": "https://demo.playwright.dev/todomvc/#/",
+                "final_url": "https://demo.playwright.dev/todomvc/#/",
+                "reached": "domcontentloaded"
+            })),
+            Method::ToolFill => ResponseBody::Ok(json!({
+                "tab_id": 17, "used_selector": ".new-todo", "value_length": 3
+            })),
+            Method::ToolPress => ResponseBody::Ok(json!({
+                "tab_id": 17, "key": "Enter", "code": "Enter", "modifiers": []
+            })),
+            Method::ToolClick => ResponseBody::Ok(json!({
+                "tab_id": 17, "used_selector": ".toggle", "x": 1.0, "y": 1.0
+            })),
+            Method::ToolSnapshot => ResponseBody::Ok(json!({
+                "text": "@e1 checkbox checked", "ref_count": 1,
+                "tab_id": 17, "truncated": false
+            })),
+            _ => panic!("unexpected flow method: {:?}", req.method),
+        }
+    });
+
+    let session_id = ipc_session_start(&sock).await;
+    let flow: FlowDefinition =
+        serde_yaml::from_str(include_str!("../../../examples/flows/todomvc.yaml")).unwrap();
+    let result: FlowRunResult = ipc_tool_call(
+        &sock,
+        Method::FlowRun,
+        FlowRunParams {
+            session_id,
+            flow,
+            variables: std::collections::BTreeMap::from([("task".into(), "吃饭".into())]),
+        },
+    )
+    .await
+    .expect("flow ok");
+    assert_eq!(result.completed_steps.len(), 5);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [
+            "tool.navigate",
+            "tool.fill",
+            "tool.press",
+            "tool.click",
+            "tool.snapshot"
+        ]
     );
     handle.shutdown().await;
 }

@@ -24,6 +24,10 @@ pub struct DaemonInfo {
     pub sock_path: PathBuf,
     pub ws_port: u16,
     pub version: String,
+    /// Random capability for the localhost Agent WebSocket. The containing
+    /// file is mode 0600 on Unix.
+    #[serde(default)]
+    pub agent_token: String,
     /// `SystemTime` rendered as RFC 3339-ish seconds-since-epoch for
     /// portability across platforms.
     pub started_at_epoch_secs: u64,
@@ -36,6 +40,7 @@ impl DaemonInfo {
             sock_path,
             ws_port,
             version: version.into(),
+            agent_token: uuid::Uuid::new_v4().to_string(),
             started_at_epoch_secs: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|d| d.as_secs())

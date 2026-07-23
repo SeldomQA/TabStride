@@ -42,6 +42,8 @@ fn main() -> ExitCode {
 fn dispatch(cli: Cli, format: Format) -> Result<(), CliError> {
     match cli.command {
         Command::Serve(args) => cli::daemon::serve(args).map_err(CliError::Local),
+        Command::Client(args) => cli::client::run(args).map_err(CliError::Local),
+        Command::Flow(cmd) => cli::flow::dispatch(cmd, format),
         Command::Daemon(cmd) => cli::daemon::dispatch(cmd).map_err(CliError::Local),
         Command::Status => {
             let output = if cli.flags.json {

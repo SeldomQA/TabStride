@@ -1,9 +1,9 @@
 //! CLI-side IPC client: reads `~/.tabstride/daemon.json` for the socket path
 //! and issues typed JSON-line RPCs over it.
 //!
-//! Each [`Client::call`] is a fresh connection (cheap: UDS is local).
-//! Future milestones may pool connections for the long-running `tabstride
-//! events` / `tabstride logs -f` commands.
+//! A [`Client`] keeps one connection open and can issue multiple sequential
+//! calls. Ordinary CLI commands create a short-lived client, while
+//! `tabstride client` reuses one instance for its entire JSON-lines stream.
 //!
 //! On Windows the same line protocol runs over a per-user named pipe.
 

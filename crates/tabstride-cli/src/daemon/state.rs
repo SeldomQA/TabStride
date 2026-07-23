@@ -27,6 +27,8 @@ pub const SERVER_NAME: &str = "tabstride-daemon";
 #[derive(Debug)]
 pub struct DaemonState {
     pub config: DaemonConfig,
+    /// Random capability required by native clients on the Agent WebSocket.
+    pub agent_token: String,
     pub browsers: Arc<BrowserRegistry>,
     pub sessions: Arc<SessionRegistry>,
     /// Per-session serial dispatch queues for `tool.*` RPCs (M6.5,
@@ -66,6 +68,7 @@ impl DaemonState {
         let session_interrupts = Arc::new(SessionInterruptRegistry::new());
         Self {
             config,
+            agent_token: uuid::Uuid::new_v4().to_string(),
             browsers,
             sessions,
             tool_queues,

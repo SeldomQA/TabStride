@@ -1,8 +1,10 @@
 //! Daemon runtime: long-lived background process exposing IPC + WS.
 
 pub mod abort;
+pub mod agent_ws;
 pub mod browsers;
 mod cancel_forward;
+pub mod flow_runtime;
 pub mod inflight;
 pub mod info;
 pub mod ipc;
