@@ -51,6 +51,29 @@ Optional: add `--browser <instance-id>` to either session-start mode when multip
 
 Emergency cleanup: `tabstride session stop --all`.
 
+## Persistent client
+
+When the harness can keep a child process alive, prefer `tabstride client` over spawning one CLI
+process per browser step. It accepts one protocol request per stdin line, writes one correlated
+response per stdout line, and keeps a single authenticated WebSocket connection to the running
+service. Pipeline requests only when their dependencies allow it; always preserve response IDs.
+Closing the client cancels its in-flight work and stops sessions it created, but still send an
+explicit `session.stop` in the normal success/error cleanup path.
+
+## Flow batching
+
+When all steps are known before execution, prefer one validated Flow over separate CLI processes:
+
+```
+tabstride flow validate <flow.yaml>
+tabstride flow run <flow.yaml> --session <id> --var key=value
+```
+
+Use Flow v1 only for deterministic `navigate`, `click`, `fill`, `press`, `snapshot`, and `wait_ms`
+steps. Targets contain exactly one `css` or `ref`. A flow stops on its first failure; do not rewrite
+or skip the failed step silently. Ctrl+C cancels the active step and the rest of the flow. Continue
+to use individual commands when the next action depends on inspecting the preceding result.
+
 ## Core interaction loop
 
 Write operations affect only the current session target: an Agent Window tab in isolated mode, or the single leased tab in attach mode.
@@ -108,6 +131,13 @@ Details and flags: **`tabstride <cmd> --help`**
 | `tabstride status` | Connection health, connected browsers, active sessions |
 | `tabstride doctor` | Deep diagnostics and repair hints |
 | `tabstride browsers` | List connected browser instances (ids, labels, versions) |
+
+### Flow
+
+| Command | Summary |
+|---------|---------|
+| `tabstride flow validate <file>` | Validate Flow YAML without contacting the service |
+| `tabstride flow run <file> --session <id>` | Submit all steps in one request; repeat `--var key=value` for variables |
 
 ### Session
 
