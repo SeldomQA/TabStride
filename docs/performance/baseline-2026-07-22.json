@@ -1,0 +1,31 @@
+{
+  "date": "2026-07-22",
+  "scenario": "wait-ms",
+  "description": "Release build; tool.wait_ms(1ms); localhost; 5 warmups; no browser required",
+  "samples": 100,
+  "cli": {
+    "p50_ms": 6.603,
+    "p95_ms": 7.792,
+    "p99_ms": 9.751,
+    "min_ms": 5.958,
+    "max_ms": 10.081
+  },
+  "native_client": {
+    "transport": "websocket",
+    "p50_ms": 2.419,
+    "p95_ms": 2.741,
+    "p99_ms": 3.34,
+    "min_ms": 2.276,
+    "max_ms": 3.838
+  },
+  "latency_reduction_percent": {
+    "p50": 63.36,
+    "p95": 64.82,
+    "p99": 65.75
+  },
+  "notes": [
+    "This fixed-cost baseline compares the same daemon-local RPC.",
+    "TodoMVC snapshot remains a separate browser-connected scenario.",
+    "Run scripts/benchmark-runtime.py --scenario todomvc-snapshot --session <id> when Chrome is connected."
+  ]
+}

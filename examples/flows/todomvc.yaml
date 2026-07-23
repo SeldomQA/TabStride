@@ -1,0 +1,25 @@
+name: todomvc-five-step
+timeout: 30s
+
+steps:
+  - navigate:
+      url: https://demo.playwright.dev/todomvc/#/
+      wait_until: domcontentloaded
+
+  - fill:
+      target:
+        css: .new-todo
+      value: "{{task}}"
+
+  - press:
+      target:
+        css: .new-todo
+      key: Enter
+
+  - click:
+      target:
+        css: .todo-list li:first-child .toggle
+
+  - snapshot:
+      max_depth: 16
+      max_tokens: 4000

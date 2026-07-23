@@ -1,0 +1,9 @@
+name: benchmark-five-step
+timeout: 1s
+
+steps:
+  - wait_ms: { duration_ms: 1 }
+  - wait_ms: { duration_ms: 1 }
+  - wait_ms: { duration_ms: 1 }
+  - wait_ms: { duration_ms: 1 }
+  - wait_ms: { duration_ms: 1 }

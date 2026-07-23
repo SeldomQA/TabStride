@@ -1,0 +1,21 @@
+{
+  "scenario": "five-step-flow",
+  "description": "Five sequential tool.wait_ms(1ms) steps submitted as one flow.run RPC",
+  "build": "release",
+  "samples": 100,
+  "warmups": 5,
+  "cli": {
+    "p50_ms": 17.339,
+    "p95_ms": 19.098,
+    "p99_ms": 19.522,
+    "min_ms": 15.271,
+    "max_ms": 19.897
+  },
+  "native_client": {
+    "p50_ms": 12.9,
+    "p95_ms": 13.312,
+    "p99_ms": 14.312,
+    "min_ms": 11.441,
+    "max_ms": 14.45
+  }
+}
