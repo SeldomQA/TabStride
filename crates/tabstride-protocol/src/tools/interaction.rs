@@ -1,9 +1,7 @@
 //! DOM interaction tools (`tool.click`, `tool.fill`, `tool.press`,
 //! `tool.select`).
 //!
-//! Element-targeted tools accept either a snapshot `ref` (`@e<N>` form,
-//! normalised against the session's RefStore) **or** a CSS selector
-//! resolved at call time. Modifiers / mouse buttons are encoded as
+//! Element-targeted tools share one strict [`Locator`] protocol. Modifiers / mouse buttons are encoded as
 //! lowercase JSON strings so the same wire shape works for CLI flags and
 //! the extension's CDP bridge.
 
@@ -34,16 +32,12 @@ pub enum MouseButton {
     Right,
 }
 
-// ---------------------------------------------------------------------------
-// click
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ClickParams {
-    pub session_id: String,
-    /// Optional `@e<N>` ref allocated by the last `tool.snapshot`.
-    /// Mutually exclusive with `selector` (caller must supply exactly
-    /// one). Accepts both `"e3"` and `"@e3"`.
+/// Unified element locator used by CLI, Flow, and extension interaction tools.
+/// Exactly one primary strategy must be present. `role` additionally requires
+/// `name`; `exact` applies to semantic string strategies only.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Locator {
     #[serde(
         rename = "ref",
         alias = "ref_",
@@ -52,7 +46,75 @@ pub struct ClickParams {
     )]
     pub ref_: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selector: Option<String>,
+    pub css: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(
+        rename = "testId",
+        alias = "test_id",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub test_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exact: Option<bool>,
+}
+
+impl Locator {
+    pub fn validate(&self) -> Result<(), String> {
+        let strategies = [
+            self.ref_.as_deref(),
+            self.css.as_deref(),
+            self.role.as_deref(),
+            self.label.as_deref(),
+            self.placeholder.as_deref(),
+            self.text.as_deref(),
+            self.test_id.as_deref(),
+        ];
+        let selected = strategies
+            .into_iter()
+            .filter(|value| value.is_some_and(|value| !value.trim().is_empty()))
+            .count();
+        if selected != 1 {
+            return Err("target requires exactly one non-empty locator strategy".into());
+        }
+        if self.role.is_some() != self.name.is_some() {
+            return Err("role locators require both `role` and `name`".into());
+        }
+        if self
+            .role
+            .as_deref()
+            .is_some_and(|role| role.trim().is_empty())
+            || self
+                .name
+                .as_deref()
+                .is_some_and(|name| name.trim().is_empty())
+        {
+            return Err("role locators require non-empty `role` and `name`".into());
+        }
+        if (self.ref_.is_some() || self.css.is_some()) && self.exact.is_some() {
+            return Err("`exact` is only valid for semantic locators".into());
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// click
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ClickParams {
+    pub session_id: String,
+    pub target: Locator,
     /// Target tab. Defaults to the Agent Window's active tab.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tab_id: Option<i64>,
@@ -72,6 +134,7 @@ pub struct ClickParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ClickResult {
     pub tab_id: i64,
+    pub used_target: Locator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub used_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -93,15 +156,7 @@ pub struct ClickResult {
 pub struct FillParams {
     pub session_id: String,
     pub value: String,
-    #[serde(
-        rename = "ref",
-        alias = "ref_",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub ref_: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selector: Option<String>,
+    pub target: Locator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tab_id: Option<i64>,
     /// Clear the field before typing. Defaults to `true`; pass `false`
@@ -116,6 +171,7 @@ pub struct FillParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FillResult {
     pub tab_id: i64,
+    pub used_target: Locator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub used_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -142,15 +198,8 @@ pub struct PressParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modifiers: Option<Vec<KeyModifier>>,
     /// Optional target to focus before dispatching the key.
-    #[serde(
-        rename = "ref",
-        alias = "ref_",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub ref_: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selector: Option<String>,
+    pub target: Option<Locator>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tab_id: Option<i64>,
     /// Hold the key down for this many milliseconds between `keyDown`
@@ -169,6 +218,8 @@ pub struct PressResult {
     pub code: String,
     #[serde(default)]
     pub modifiers: Vec<KeyModifier>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_target: Option<Locator>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dialogs: Vec<JavaScriptDialogInfo>,
 }
@@ -185,20 +236,7 @@ pub struct SelectParams {
     /// `<select multiple>` the list replaces the current selection
     /// (an empty list clears all selections).
     pub values: Vec<String>,
-    /// Optional `@e<N>` ref allocated by the last `tool.snapshot`.
-    /// Mutually exclusive with `selector`. Accepts both `"e3"` and
-    /// `"@e3"`.
-    #[serde(
-        rename = "ref",
-        alias = "ref_",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub ref_: Option<String>,
-    /// CSS selector resolved against the live DOM. Mutually exclusive
-    /// with `ref_`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selector: Option<String>,
+    pub target: Locator,
     /// Target tab. Defaults to the Agent Window's active tab.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tab_id: Option<i64>,
@@ -211,6 +249,7 @@ pub struct SelectParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SelectResult {
     pub tab_id: i64,
+    pub used_target: Locator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub used_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -231,12 +270,25 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn ref_locator(value: &str) -> Locator {
+        Locator {
+            ref_: Some(value.into()),
+            css: None,
+            role: None,
+            name: None,
+            label: None,
+            placeholder: None,
+            text: None,
+            test_id: None,
+            exact: None,
+        }
+    }
+
     #[test]
-    fn click_params_serialise_ref_field_name() {
+    fn click_params_serialise_nested_target() {
         let p = ClickParams {
             session_id: "abcd".into(),
-            ref_: Some("@e3".into()),
-            selector: None,
+            target: ref_locator("@e3"),
             tab_id: Some(42),
             button: Some(MouseButton::Left),
             click_count: Some(1),
@@ -244,21 +296,19 @@ mod tests {
             timeout_ms: Some(5_000),
         };
         let v = serde_json::to_value(&p).unwrap();
-        assert_eq!(v.get("ref").and_then(|v| v.as_str()), Some("@e3"));
-        assert!(v.get("ref_").is_none());
+        assert_eq!(v["target"]["ref"], "@e3");
         let round: ClickParams = serde_json::from_value(v).unwrap();
         assert_eq!(round, p);
     }
 
     #[test]
-    fn click_params_accept_legacy_ref_alias() {
+    fn locator_accepts_rust_ref_alias() {
         let p: ClickParams = serde_json::from_value(json!({
             "session_id": "a",
-            "ref_": "e1",
-            "selector": null,
+            "target": { "ref_": "e1" },
         }))
         .unwrap();
-        assert_eq!(p.ref_.as_deref(), Some("e1"));
+        assert_eq!(p.target.ref_.as_deref(), Some("e1"));
     }
 
     #[test]
@@ -276,6 +326,7 @@ mod tests {
             key: "a".into(),
             code: "KeyA".into(),
             modifiers: vec![KeyModifier::Ctrl, KeyModifier::Shift],
+            used_target: None,
             dialogs: vec![],
         };
         let v = serde_json::to_value(&r).unwrap();
@@ -288,8 +339,7 @@ mod tests {
         let p = FillParams {
             session_id: "abcd".into(),
             value: "hello".into(),
-            ref_: Some("@e1".into()),
-            selector: None,
+            target: ref_locator("@e1"),
             tab_id: None,
             clear_before: None,
             timeout_ms: None,
@@ -303,8 +353,7 @@ mod tests {
         let p = SelectParams {
             session_id: "abcd".into(),
             values: vec!["us".into(), "ca".into()],
-            ref_: Some("@e3".into()),
-            selector: None,
+            target: ref_locator("@e3"),
             tab_id: Some(12),
             timeout_ms: Some(5_000),
         };
@@ -312,5 +361,79 @@ mod tests {
         assert_eq!(v.get("values").cloned(), Some(json!(["us", "ca"])));
         let round: SelectParams = serde_json::from_value(v).unwrap();
         assert_eq!(round, p);
+    }
+
+    #[test]
+    fn locator_validates_every_strategy_and_role_name_pair() {
+        for locator in [
+            ref_locator("@e1"),
+            Locator {
+                css: Some("#save".into()),
+                ..Locator::default()
+            },
+            Locator {
+                role: Some("button".into()),
+                name: Some("Save".into()),
+                exact: Some(true),
+                ..Locator::default()
+            },
+            Locator {
+                label: Some("Email".into()),
+                ..Locator::default()
+            },
+            Locator {
+                placeholder: Some("name@example.com".into()),
+                ..Locator::default()
+            },
+            Locator {
+                text: Some("Welcome".into()),
+                ..Locator::default()
+            },
+            Locator {
+                test_id: Some("save".into()),
+                ..Locator::default()
+            },
+        ] {
+            locator.validate().unwrap();
+        }
+        assert!(
+            Locator {
+                role: Some("button".into()),
+                ..Locator::default()
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Locator {
+                role: Some("button".into()),
+                name: Some("   ".into()),
+                ..Locator::default()
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Locator {
+                css: Some("button".into()),
+                text: Some("Save".into()),
+                ..Locator::default()
+            }
+            .validate()
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn locator_uses_test_id_wire_name() {
+        let locator = Locator {
+            test_id: Some("save".into()),
+            exact: Some(true),
+            ..Locator::default()
+        };
+        let value = serde_json::to_value(&locator).unwrap();
+        assert_eq!(value, json!({"testId": "save", "exact": true}));
+        let round: Locator = serde_json::from_value(value).unwrap();
+        assert_eq!(round, locator);
     }
 }

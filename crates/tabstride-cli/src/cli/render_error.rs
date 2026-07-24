@@ -42,6 +42,8 @@ pub mod reason {
     pub const ELEMENT_NOT_VISIBLE: &str = "element_not_visible";
     pub const REF_NOT_FOUND: &str = "ref_not_found";
     pub const SELECTOR_NOT_FOUND: &str = "selector_not_found";
+    pub const LOCATOR_NOT_FOUND: &str = "locator_not_found";
+    pub const AMBIGUOUS_TARGET: &str = "ambiguous_target";
     pub const TARGET_NOT_FILLABLE: &str = "target_not_fillable";
     pub const TARGET_NOT_SELECT: &str = "target_not_select";
     pub const OPTION_NOT_FOUND: &str = "option_not_found";
@@ -94,6 +96,13 @@ pub fn info_for(code: ErrorCode) -> RenderInfo {
             summary: "requested resource does not exist",
             hint: Some(
                 "the session, tab, or browser may have stopped; run `tabstride sessions` / `tabstride browsers` to see current state",
+            ),
+            exit_code: 1,
+        },
+        ErrorCode::AmbiguousTarget => RenderInfo {
+            summary: "locator matched more than one element",
+            hint: Some(
+                "make the locator more specific or pass `--exact`; strict matching never selects the first match silently",
             ),
             exit_code: 1,
         },
@@ -221,6 +230,20 @@ pub fn info_for_error(code: ErrorCode, data: Option<&serde_json::Value>) -> Rend
             hint: Some("verify the CSS selector or wait for the element to appear before retrying"),
             exit_code: base.exit_code,
         },
+        (ErrorCode::NotFound, reason::LOCATOR_NOT_FOUND) => RenderInfo {
+            summary: "locator did not match any element",
+            hint: Some(
+                "verify the locator, rerun snapshot, or wait for the element to appear before retrying",
+            ),
+            exit_code: base.exit_code,
+        },
+        (ErrorCode::AmbiguousTarget, reason::AMBIGUOUS_TARGET) => RenderInfo {
+            summary: "locator matched more than one element",
+            hint: Some(
+                "add a more specific accessible name, use `--exact`, or choose a unique CSS/ref locator",
+            ),
+            exit_code: base.exit_code,
+        },
         (ErrorCode::InvalidParams, reason::TARGET_NOT_FILLABLE) => RenderInfo {
             summary: "target element is not fillable",
             hint: Some(
@@ -284,6 +307,7 @@ mod tests {
         //   5 version incompatibility
         assert_eq!(exit_code_for(ErrorCode::InvalidParams), 1);
         assert_eq!(exit_code_for(ErrorCode::NotFound), 1);
+        assert_eq!(exit_code_for(ErrorCode::AmbiguousTarget), 1);
         assert_eq!(exit_code_for(ErrorCode::PermissionDenied), 1);
         assert_eq!(exit_code_for(ErrorCode::NoBrowserConnected), 1);
         assert_eq!(exit_code_for(ErrorCode::MultipleBrowsersOnline), 1);
@@ -337,6 +361,7 @@ mod tests {
         ErrorCode::Unsupported,
         ErrorCode::InvalidParams,
         ErrorCode::NotFound,
+        ErrorCode::AmbiguousTarget,
         ErrorCode::PermissionDenied,
         ErrorCode::Timeout,
         ErrorCode::CdpFailed,
@@ -378,6 +403,20 @@ mod tests {
         let info = info_for_error(ErrorCode::NotFound, Some(&data));
         assert_eq!(info.summary, "snapshot ref was not found for this tab");
         assert!(info.hint.unwrap().contains("tabstride snapshot"));
+    }
+
+    #[test]
+    fn locator_matching_errors_have_actionable_copy() {
+        let missing = serde_json::json!({ "reason": reason::LOCATOR_NOT_FOUND });
+        let info = info_for_error(ErrorCode::NotFound, Some(&missing));
+        assert_eq!(info.summary, "locator did not match any element");
+        assert!(info.hint.unwrap().contains("rerun snapshot"));
+
+        let multiple = serde_json::json!({ "reason": reason::AMBIGUOUS_TARGET });
+        let info = info_for_error(ErrorCode::AmbiguousTarget, Some(&multiple));
+        assert_eq!(info.summary, "locator matched more than one element");
+        assert!(info.hint.unwrap().contains("--exact"));
+        assert_eq!(info.exit_code, 1);
     }
 
     #[test]

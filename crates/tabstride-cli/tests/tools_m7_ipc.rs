@@ -17,10 +17,10 @@ use tabstride::daemon::{self, DaemonConfig};
 use tabstride::ipc_client::IpcClient;
 use tabstride_protocol::system::{HandshakeParams, HandshakeResult};
 use tabstride_protocol::tools::{
-    ClickParams, ClickResult, FillParams, FillResult, KeyModifier, MouseButton, NavigateBackParams,
-    NavigateBackResult, NavigateForwardParams, NavigateForwardResult, NavigateParams,
-    NavigateResult, PressParams, PressResult, ReloadParams, ReloadResult, SelectParams,
-    SelectResult, SessionStartParams, SessionStartResult, WaitUntil,
+    ClickParams, ClickResult, FillParams, FillResult, KeyModifier, Locator, MouseButton,
+    NavigateBackParams, NavigateBackResult, NavigateForwardParams, NavigateForwardResult,
+    NavigateParams, NavigateResult, PressParams, PressResult, ReloadParams, ReloadResult,
+    SelectParams, SelectResult, SessionStartParams, SessionStartResult, WaitUntil,
 };
 use tabstride_protocol::{
     BrowserPeerInfo, ErrorCode, FlowDefinition, FlowRunParams, FlowRunResult, Frame, Method,
@@ -33,6 +33,20 @@ use tokio_tungstenite::tungstenite::http::Request;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 const TEST_EXT_ID: &str = "abcdefghijklmnopabcdefghijklmnop";
+
+fn ref_locator(value: &str) -> Locator {
+    Locator {
+        ref_: Some(value.into()),
+        ..Locator::default()
+    }
+}
+
+fn css_locator(value: &str) -> Locator {
+    Locator {
+        css: Some(value.into()),
+        ..Locator::default()
+    }
+}
 
 fn tempfile_path(prefix: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
@@ -296,6 +310,89 @@ async fn five_step_flow_reuses_the_existing_tool_queue() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn individual_cli_rpc_and_flow_share_the_same_locator_wire_shape() {
+    let (handle, sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    let _ = do_handshake(&mut ws).await;
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<Locator>::new()));
+    let seen_by_extension = Arc::clone(&seen);
+    run_extension(ws, move |req| {
+        assert_eq!(req.method, Method::ToolClick);
+        let params: ClickParams =
+            serde_json::from_value(req.params.clone().expect("click params")).unwrap();
+        seen_by_extension
+            .lock()
+            .unwrap()
+            .push(params.target.clone());
+        ResponseBody::Ok(
+            serde_json::to_value(ClickResult {
+                tab_id: 17,
+                used_target: params.target.clone(),
+                used_ref: params.target.ref_.clone(),
+                used_selector: params.target.css.clone(),
+                x: 10.0,
+                y: 20.0,
+                dialogs: vec![],
+            })
+            .unwrap(),
+        )
+    });
+
+    let session_id = ipc_session_start(&sock).await;
+    let target = Locator {
+        role: Some("button".into()),
+        name: Some("Save".into()),
+        exact: Some(true),
+        ..Locator::default()
+    };
+    let direct: ClickResult = ipc_tool_call(
+        &sock,
+        Method::ToolClick,
+        ClickParams {
+            session_id: session_id.clone(),
+            target: target.clone(),
+            tab_id: None,
+            button: None,
+            click_count: None,
+            modifiers: None,
+            timeout_ms: Some(5_000),
+        },
+    )
+    .await
+    .expect("direct click ok");
+
+    let flow: FlowDefinition = serde_yaml::from_str(
+        r#"name: locator-parity
+steps:
+  - click:
+      target:
+        role: button
+        name: Save
+        exact: true
+"#,
+    )
+    .unwrap();
+    let flow_result: FlowRunResult = ipc_tool_call(
+        &sock,
+        Method::FlowRun,
+        FlowRunParams {
+            session_id,
+            flow,
+            variables: std::collections::BTreeMap::new(),
+        },
+    )
+    .await
+    .expect("flow click ok");
+    let flow_click: ClickResult =
+        serde_json::from_value(flow_result.completed_steps[0].output.clone()).unwrap();
+
+    assert_eq!(direct.used_target, target);
+    assert_eq!(flow_click.used_target, target);
+    assert_eq!(*seen.lock().unwrap(), vec![target.clone(), target]);
+    handle.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn navigate_back_round_trips_previous_url() {
     let (handle, sock) = spawn_daemon().await;
     let mut ws = connect_ext(handle.ws_addr()).await;
@@ -402,14 +499,11 @@ async fn click_round_trips_ref_and_modifiers() {
 
     run_extension(ws, |req| {
         assert_eq!(req.method, Method::ToolClick);
-        // Verify the wire form: `ref` not `ref_`.
+        // Verify the nested target wire form: `ref` not `ref_`.
         let params = req.params.clone().unwrap();
-        if let Value::Object(map) = &params {
-            assert!(map.contains_key("ref"));
-            assert!(!map.contains_key("ref_"));
-        }
+        assert_eq!(params["target"]["ref"], "@e3");
         let p: ClickParams = serde_json::from_value(params).unwrap();
-        assert_eq!(p.ref_.as_deref(), Some("@e3"));
+        assert_eq!(p.target.ref_.as_deref(), Some("@e3"));
         assert_eq!(p.button, Some(MouseButton::Right));
         assert_eq!(
             p.modifiers,
@@ -418,6 +512,7 @@ async fn click_round_trips_ref_and_modifiers() {
         ResponseBody::Ok(
             serde_json::to_value(ClickResult {
                 tab_id: 9,
+                used_target: ref_locator("e3"),
                 used_ref: Some("e3".into()),
                 used_selector: None,
                 x: 12.5,
@@ -434,8 +529,7 @@ async fn click_round_trips_ref_and_modifiers() {
         Method::ToolClick,
         ClickParams {
             session_id,
-            ref_: Some("@e3".into()),
-            selector: None,
+            target: ref_locator("@e3"),
             tab_id: None,
             button: Some(MouseButton::Right),
             click_count: Some(1),
@@ -465,6 +559,7 @@ async fn fill_round_trips_clear_before_default() {
         ResponseBody::Ok(
             serde_json::to_value(FillResult {
                 tab_id: 12,
+                used_target: css_locator(".search"),
                 used_ref: None,
                 used_selector: Some(".search".into()),
                 value_length: 11,
@@ -481,8 +576,7 @@ async fn fill_round_trips_clear_before_default() {
         FillParams {
             session_id,
             value: "hello world".into(),
-            ref_: None,
-            selector: Some(".search".into()),
+            target: css_locator(".search"),
             tab_id: None,
             clear_before: None,
             timeout_ms: Some(5_000),
@@ -511,6 +605,7 @@ async fn press_round_trips_compound_key() {
                 key: "A".into(),
                 code: "KeyA".into(),
                 modifiers: vec![KeyModifier::Ctrl],
+                used_target: None,
                 dialogs: vec![],
             })
             .unwrap(),
@@ -525,8 +620,7 @@ async fn press_round_trips_compound_key() {
             session_id,
             key: "Ctrl+A".into(),
             modifiers: None,
-            ref_: None,
-            selector: None,
+            target: None,
             tab_id: None,
             hold_ms: None,
             timeout_ms: Some(5_000),
@@ -552,6 +646,7 @@ async fn select_round_trips_values() {
         ResponseBody::Ok(
             serde_json::to_value(SelectResult {
                 tab_id: 12,
+                used_target: ref_locator("e3"),
                 used_ref: Some("e3".into()),
                 used_selector: None,
                 multiple: true,
@@ -570,8 +665,7 @@ async fn select_round_trips_values() {
         SelectParams {
             session_id,
             values: vec!["us".into(), "ca".into()],
-            ref_: Some("@e3".into()),
-            selector: None,
+            target: ref_locator("@e3"),
             tab_id: None,
             timeout_ms: Some(5_000),
         },
@@ -671,8 +765,7 @@ async fn m7_tools_propagate_extension_errors() {
         Method::ToolClick,
         ClickParams {
             session_id: session_id.clone(),
-            ref_: Some("@e1".into()),
-            selector: None,
+            target: ref_locator("@e1"),
             tab_id: None,
             button: None,
             click_count: None,
@@ -690,8 +783,7 @@ async fn m7_tools_propagate_extension_errors() {
         FillParams {
             session_id: session_id.clone(),
             value: "hello".into(),
-            ref_: None,
-            selector: Some("input".into()),
+            target: css_locator("input"),
             tab_id: None,
             clear_before: None,
             timeout_ms: Some(5_000),
@@ -708,8 +800,7 @@ async fn m7_tools_propagate_extension_errors() {
             session_id: session_id.clone(),
             key: "Enter".into(),
             modifiers: None,
-            ref_: None,
-            selector: None,
+            target: None,
             tab_id: None,
             hold_ms: None,
             timeout_ms: Some(5_000),
@@ -725,8 +816,7 @@ async fn m7_tools_propagate_extension_errors() {
         SelectParams {
             session_id: session_id.clone(),
             values: vec!["a".into()],
-            ref_: Some("@e1".into()),
-            selector: None,
+            target: ref_locator("@e1"),
             tab_id: None,
             timeout_ms: Some(5_000),
         },

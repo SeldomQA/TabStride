@@ -152,16 +152,16 @@ pub enum Command {
     /// Reload the current tab.
     Reload(ReloadArgs),
 
-    /// Click a snapshot ref or CSS selector.
+    /// Click exactly one element located by ref, CSS, or semantic target.
     Click(ClickArgs),
 
-    /// Fill an input / textarea / contenteditable.
+    /// Fill exactly one input / textarea / contenteditable.
     Fill(FillArgs),
 
-    /// Dispatch a keyboard key combo.
+    /// Dispatch a keyboard key combo, optionally focusing a located element.
     Press(PressArgs),
 
-    /// Set `<select>` option values by `value` attribute.
+    /// Set option values on exactly one located `<select>`.
     Select(SelectArgs),
 
     /// Evaluate a JavaScript expression inside the Agent Window.

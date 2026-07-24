@@ -77,6 +77,7 @@ fn main() {
     dump!(PressResult, "tool_press_result");
     dump!(SelectParams, "tool_select_params");
     dump!(SelectResult, "tool_select_result");
+    dump!(Locator, "locator");
 
     dump!(SnapshotParams, "tool_snapshot_params");
     dump!(SnapshotResult, "tool_snapshot_result");

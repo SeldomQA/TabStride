@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::tools::{KeyModifier, WaitUntil};
+use crate::tools::{KeyModifier, Locator, WaitUntil};
 use crate::{ErrorCode, RpcError};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -50,14 +50,7 @@ flow_entry!(FlowPressEntry, press, FlowPressStep);
 flow_entry!(FlowSnapshotEntry, snapshot, FlowSnapshotStep);
 flow_entry!(FlowWaitMsEntry, wait_ms, FlowWaitMsStep);
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct FlowTarget {
-    #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
-    pub ref_: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub css: Option<String>,
-}
+pub type FlowTarget = Locator;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -161,16 +154,6 @@ pub struct FlowFailureData {
     pub cause: RpcError,
 }
 
-impl FlowTarget {
-    pub fn validate(&self) -> Result<(), String> {
-        match (&self.ref_, &self.css) {
-            (Some(_), None) | (None, Some(_)) => Ok(()),
-            (None, None) => Err("target requires exactly one of `ref` or `css`".into()),
-            (Some(_), Some(_)) => Err("target cannot contain both `ref` and `css`".into()),
-        }
-    }
-}
-
 impl FlowDefinition {
     pub fn validate(&self) -> Result<(), RpcError> {
         if self.name.trim().is_empty() {
@@ -221,13 +204,23 @@ steps:
       value: "{{value}}"
   - press:
       key: Enter
-      target: { css: input }
+      target:
+        role: textbox
+        name: Task
+        exact: true
   - snapshot: {}
 "#,
         )
         .unwrap();
         assert_eq!(flow.steps.len(), 4);
         flow.validate().unwrap();
+        let FlowStep::Press(entry) = &flow.steps[2] else {
+            panic!("expected press step");
+        };
+        assert_eq!(
+            entry.press.target.as_ref().unwrap().role.as_deref(),
+            Some("textbox")
+        );
     }
 
     #[test]
@@ -235,6 +228,13 @@ steps:
         let target = FlowTarget {
             ref_: Some("@e1".into()),
             css: Some("button".into()),
+            role: None,
+            name: None,
+            label: None,
+            placeholder: None,
+            text: None,
+            test_id: None,
+            exact: None,
         };
         assert!(target.validate().is_err());
     }

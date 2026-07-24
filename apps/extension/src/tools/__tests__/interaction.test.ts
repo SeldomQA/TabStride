@@ -66,6 +66,22 @@ describe("modifiersBitfield", () => {
 });
 
 describe("handleClick", () => {
+  it("rejects locators outside an attach session's leased tab", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    sm.startAttached("aa11", 77, 9);
+    const fake = makeFakeCdp({});
+    const res = await handleClick(
+      sm,
+      { session_id: "aa11", tab_id: 78, target: { css: "#save" } },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    expect(res).toMatchObject({
+      code: "permission_denied",
+      data: { reason: "attached_tab_scope" },
+    });
+    expect(fake.cdp.send).not.toHaveBeenCalled();
+  });
+
   it("rejects when neither ref nor selector is given", async () => {
     const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
     await sm.start("aa11");
@@ -84,12 +100,12 @@ describe("handleClick", () => {
     const fake = makeFakeCdp({});
     const res = await handleClick(
       sm,
-      { session_id: "aa11", ref: "@e1", selector: ".btn" },
+      { session_id: "aa11", target: { ref: "@e1", css: ".btn" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     expect(res).toMatchObject({
       code: "invalid_params",
-      message: /both ref and selector/i,
+      message: /exactly one/i,
     });
   });
 
@@ -99,7 +115,7 @@ describe("handleClick", () => {
     const fake = makeFakeCdp({});
     const res = await handleClick(
       sm,
-      { session_id: "aa11", ref: "@e99" },
+      { session_id: "aa11", target: { ref: "@e99" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     expect(res).toMatchObject({ code: "not_found", data: { reason: "ref_not_found" } });
@@ -112,7 +128,7 @@ describe("handleClick", () => {
     const fake = makeFakeCdp({});
     const res = await handleClick(
       sm,
-      { session_id: "aa11", ref: "@e3", tab_id: 5 },
+      { session_id: "aa11", target: { ref: "@e3" }, tab_id: 5 },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     expect(res).toMatchObject({ code: "not_found", data: { reason: "ref_not_found" } });
@@ -133,7 +149,7 @@ describe("handleClick", () => {
       sm,
       {
         session_id: "aa11",
-        ref: "@e3",
+        target: { ref: "@e3" },
         button: "left",
         click_count: 2,
         modifiers: ["ctrl", "shift"],
@@ -195,7 +211,7 @@ describe("handleClick", () => {
     });
     const res = await handleClick(
       sm,
-      { session_id: "aa11", ref: "@e3" },
+      { session_id: "aa11", target: { ref: "@e3" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi, bypassOverlay },
     );
     if ("code" in res) throw new Error(`unexpected error: ${JSON.stringify(res)}`);
@@ -236,7 +252,7 @@ describe("handleClick", () => {
     });
     const res = await handleClick(
       sm,
-      { session_id: "aa11", ref: "@e3" },
+      { session_id: "aa11", target: { ref: "@e3" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi, bypassOverlay },
     );
     expect(res).toMatchObject({ code: "cdp_failed" });
@@ -263,7 +279,7 @@ describe("handleClick", () => {
     });
     await handleClick(
       sm,
-      { session_id: "aa11", ref: "@e3" },
+      { session_id: "aa11", target: { ref: "@e3" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi, bypassOverlay },
     );
     expect(bypassOverlay).not.toHaveBeenCalled();
@@ -280,7 +296,7 @@ describe("handleClick", () => {
 
     const res = await handleClick(
       sm,
-      { session_id: "aa11", ref: "@e3", click_count: 0 },
+      { session_id: "aa11", target: { ref: "@e3" }, click_count: 0 },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
 
@@ -300,7 +316,7 @@ describe("handleClick", () => {
     });
     const res = await handleClick(
       sm,
-      { session_id: "aa11", ref: "e1" },
+      { session_id: "aa11", target: { ref: "e1" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     if ("code" in res) throw new Error(`unexpected error: ${JSON.stringify(res)}`);
@@ -321,7 +337,7 @@ describe("handleClick", () => {
     });
     const res = await handleClick(
       sm,
-      { session_id: "aa11", ref: "e1" },
+      { session_id: "aa11", target: { ref: "e1" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     expect(res).toMatchObject({
@@ -336,9 +352,9 @@ describe("handleClick", () => {
     await sm.start("aa11");
     const fake = makeFakeCdp({
       "DOM.getDocument": () => ({ root: { nodeId: 1 } }),
-      "DOM.querySelector": (p) => {
+      "DOM.querySelectorAll": (p) => {
         expect(p).toMatchObject({ nodeId: 1, selector: ".btn-go" });
-        return { nodeId: 99 };
+        return { nodeIds: [99] };
       },
       "DOM.describeNode": () => ({ node: { backendNodeId: 7777 } }),
       "DOM.scrollIntoViewIfNeeded": () => ({}),
@@ -347,7 +363,7 @@ describe("handleClick", () => {
     });
     const res = await handleClick(
       sm,
-      { session_id: "aa11", selector: ".btn-go" },
+      { session_id: "aa11", target: { css: ".btn-go" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     if ("code" in res) throw new Error(`unexpected error: ${JSON.stringify(res)}`);
@@ -371,7 +387,7 @@ describe("handleClick", () => {
 
     const res = await handleClick(
       sm,
-      { session_id: "aa11", ref: "e1" },
+      { session_id: "aa11", target: { ref: "e1" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
 
@@ -385,14 +401,14 @@ describe("handleClick", () => {
     await sm.start("aa11");
     const fake = makeFakeCdp({
       "DOM.getDocument": () => ({ root: { nodeId: 1 } }),
-      "DOM.querySelector": () => ({ nodeId: 0 }),
+      "DOM.querySelectorAll": () => ({ nodeIds: [] }),
     });
     const res = await handleClick(
       sm,
-      { session_id: "aa11", selector: ".missing" },
+      { session_id: "aa11", target: { css: ".missing" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
-    expect(res).toMatchObject({ code: "not_found", data: { reason: "selector_not_found" } });
+    expect(res).toMatchObject({ code: "not_found", data: { reason: "locator_not_found" } });
   });
 
   it("respects the AbortSignal", async () => {
@@ -404,7 +420,7 @@ describe("handleClick", () => {
     const fake = makeFakeCdp({});
     const res = await handleClick(
       sm,
-      { session_id: "aa11", ref: "e1" },
+      { session_id: "aa11", target: { ref: "e1" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi, signal: abort.signal },
     );
     expect(res).toMatchObject({ code: "cancelled" });
@@ -426,7 +442,7 @@ describe("handleClick", () => {
 
     const res = await handleClick(
       sm,
-      { session_id: "aa11", ref: "e1" },
+      { session_id: "aa11", target: { ref: "e1" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi, signal: abort.signal },
     );
 
@@ -442,7 +458,7 @@ describe("handleFill", () => {
     const fake = makeFakeCdp({});
     const res = await handleFill(
       sm,
-      { session_id: "aa11", ref: "e99", value: "hello" },
+      { session_id: "aa11", target: { ref: "e99" }, value: "hello" },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     expect(res).toMatchObject({ code: "not_found", data: { reason: "ref_not_found" } });
@@ -460,7 +476,7 @@ describe("handleFill", () => {
     });
     const res = await handleFill(
       sm,
-      { session_id: "aa11", ref: "e1", value: "hi" },
+      { session_id: "aa11", target: { ref: "e1" }, value: "hi" },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     expect(res).toMatchObject({
@@ -486,7 +502,7 @@ describe("handleFill", () => {
     });
     const res = await handleFill(
       sm,
-      { session_id: "aa11", ref: "e1", value: "hello" },
+      { session_id: "aa11", target: { ref: "e1" }, value: "hello" },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     if ("code" in res) throw new Error(`unexpected error: ${JSON.stringify(res)}`);
@@ -523,7 +539,7 @@ describe("handleFill", () => {
     });
     const res = await handleFill(
       sm,
-      { session_id: "aa11", ref: "e1", value: "x", clear_before: false },
+      { session_id: "aa11", target: { ref: "e1" }, value: "x", clear_before: false },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     if ("code" in res) throw new Error(`unexpected error: ${JSON.stringify(res)}`);
@@ -550,7 +566,7 @@ describe("handleFill", () => {
     });
     const res = await handleFill(
       sm,
-      { session_id: "aa11", ref: "e1", value: "rich" },
+      { session_id: "aa11", target: { ref: "e1" }, value: "rich" },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     expect("code" in res).toBe(false);
@@ -577,7 +593,7 @@ describe("handleFill", () => {
 
     const res = await handleFill(
       sm,
-      { session_id: "aa11", ref: "e1", value: "hello" },
+      { session_id: "aa11", target: { ref: "e1" }, value: "hello" },
       { cdp: fake.cdp, tabsApi: fake.tabsApi, signal: abort.signal },
     );
 
@@ -603,7 +619,7 @@ describe("handleFill", () => {
 
     const res = await handleFill(
       sm,
-      { session_id: "aa11", ref: "e1", value: "hello" },
+      { session_id: "aa11", target: { ref: "e1" }, value: "hello" },
       { cdp: fake.cdp, tabsApi: fake.tabsApi, signal: abort.signal },
     );
 
@@ -677,7 +693,7 @@ describe("handlePress", () => {
     const fake = makeFakeCdp({});
     const res = await handlePress(
       sm,
-      { session_id: "aa11", ref: "@e99", key: "Enter" },
+      { session_id: "aa11", target: { ref: "@e99" }, key: "Enter" },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     expect(res).toMatchObject({ code: "not_found", data: { reason: "ref_not_found" } });
@@ -741,7 +757,7 @@ describe("handlePress", () => {
     });
     const res = await handlePress(
       sm,
-      { session_id: "aa11", key: "Enter", ref: "@e1" },
+      { session_id: "aa11", key: "Enter", target: { ref: "@e1" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     expectPressOk(res);
@@ -765,7 +781,7 @@ describe("handlePress", () => {
 
     const res = await handlePress(
       sm,
-      { session_id: "aa11", key: "Enter", ref: "@e1" },
+      { session_id: "aa11", key: "Enter", target: { ref: "@e1" } },
       { cdp: fake.cdp, tabsApi: fake.tabsApi, signal: abort.signal },
     );
 
@@ -855,7 +871,7 @@ describe("handleSelect", () => {
     });
     const res = await handleSelect(
       sm,
-      { session_id: "aa11", ref: "e1", values: ["a"] },
+      { session_id: "aa11", target: { ref: "e1" }, values: ["a"] },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     expect(res).toMatchObject({
@@ -878,7 +894,7 @@ describe("handleSelect", () => {
     );
     const res = await handleSelect(
       sm,
-      { session_id: "aa11", ref: "e1", values: ["us", "ca"] },
+      { session_id: "aa11", target: { ref: "e1" }, values: ["us", "ca"] },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     if ("code" in res) throw new Error(`unexpected error: ${JSON.stringify(res)}`);
@@ -905,7 +921,7 @@ describe("handleSelect", () => {
     );
     const res = await handleSelect(
       sm,
-      { session_id: "aa11", ref: "e1", values: ["us"] },
+      { session_id: "aa11", target: { ref: "e1" }, values: ["us"] },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     if ("code" in res) throw new Error(`unexpected error: ${JSON.stringify(res)}`);
@@ -926,7 +942,7 @@ describe("handleSelect", () => {
     );
     const res = await handleSelect(
       sm,
-      { session_id: "aa11", ref: "e1", values: ["zz"] },
+      { session_id: "aa11", target: { ref: "e1" }, values: ["zz"] },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     expect(res).toMatchObject({
@@ -946,7 +962,7 @@ describe("handleSelect", () => {
     });
     const res = await handleSelect(
       sm,
-      { session_id: "aa11", ref: "e1", values: ["a", "b"] },
+      { session_id: "aa11", target: { ref: "e1" }, values: ["a", "b"] },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     expect(res).toMatchObject({
@@ -975,7 +991,7 @@ describe("handleSelect", () => {
     });
     const res = await handleSelect(
       sm,
-      { session_id: "aa11", ref: "e1", values: ["a"] },
+      { session_id: "aa11", target: { ref: "e1" }, values: ["a"] },
       { cdp: fake.cdp, tabsApi: fake.tabsApi, signal: abort.signal },
     );
     expect(res).toMatchObject({ code: "cancelled" });

@@ -1,8 +1,9 @@
 //! `tabstride click` / `tabstride fill` / `tabstride press` (M7 interaction tools).
 //!
-//! The `<target>` positional accepts either a snapshot ref (`@e3`,
-//! `e3`) or a CSS selector. Use `--ref` / `--selector` explicitly when
-//! the value is ambiguous.
+//! The compatibility `<target>` positional accepts either a snapshot ref
+//! (`@e3`, `e3`) or CSS. Locator flags also support role + accessible name,
+//! label, placeholder, visible text, and test id. Every locator must resolve
+//! to exactly one element.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -11,8 +12,8 @@ use anyhow::Context;
 use clap::{Args, ValueEnum};
 use tabstride_protocol::Method;
 use tabstride_protocol::tools::{
-    ClickParams, ClickResult, FillParams, FillResult, KeyModifier, MouseButton, PressParams,
-    PressResult, SelectParams, SelectResult,
+    ClickParams, ClickResult, FillParams, FillResult, KeyModifier, Locator, MouseButton,
+    PressParams, PressResult, SelectParams, SelectResult,
 };
 
 use crate::cli::dialogs::print_dialog_summaries;
@@ -71,28 +72,109 @@ pub(crate) fn parse_modifiers(input: &str) -> Result<Vec<KeyModifier>, String> {
     Ok(out)
 }
 
-fn split_target(
+#[derive(Debug, Clone, Args, Default)]
+pub struct LocatorFlags {
+    /// Locate by a snapshot ref from the latest snapshot.
+    #[arg(long = "ref")]
+    pub ref_: Option<String>,
+
+    /// Locate by CSS with strict single-element matching.
+    #[arg(long = "css", visible_alias = "selector")]
+    pub css: Option<String>,
+
+    /// Locate by ARIA role; requires --name.
+    #[arg(long)]
+    pub role: Option<String>,
+
+    /// Accessible name paired with --role.
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// Locate a control by its associated label.
+    #[arg(long)]
+    pub label: Option<String>,
+
+    /// Locate by placeholder text.
+    #[arg(long)]
+    pub placeholder: Option<String>,
+
+    /// Locate by visible text.
+    #[arg(long)]
+    pub text: Option<String>,
+
+    /// Locate by data-testid.
+    #[arg(long = "test-id")]
+    pub test_id: Option<String>,
+
+    /// Require an exact semantic string match instead of substring matching.
+    #[arg(long)]
+    pub exact: bool,
+}
+
+impl LocatorFlags {
+    fn is_empty(&self) -> bool {
+        self.ref_.is_none()
+            && self.css.is_none()
+            && self.role.is_none()
+            && self.name.is_none()
+            && self.label.is_none()
+            && self.placeholder.is_none()
+            && self.text.is_none()
+            && self.test_id.is_none()
+            && !self.exact
+    }
+}
+
+fn build_locator(
     positional: Option<String>,
-    explicit_ref: Option<String>,
-    explicit_selector: Option<String>,
-) -> Result<(Option<String>, Option<String>), CliError> {
-    match (positional, explicit_ref, explicit_selector) {
-        (None, None, None) => Err(CliError::Local(anyhow::anyhow!(
-            "missing target: pass <ref-or-selector>, --ref @eN, or --selector <css>"
-        ))),
-        (None, Some(r), None) => Ok((Some(r), None)),
-        (None, None, Some(s)) => Ok((None, Some(s))),
-        (Some(t), None, None) => {
-            if looks_like_ref(&t) {
-                Ok((Some(t), None))
-            } else {
-                Ok((None, Some(t)))
+    flags: &LocatorFlags,
+    required: bool,
+) -> Result<Option<Locator>, CliError> {
+    if positional.is_some() && !flags.is_empty() {
+        return Err(CliError::Local(anyhow::anyhow!(
+            "pass either positional <target> or one locator flag, not both"
+        )));
+    }
+    let locator = if let Some(target) = positional {
+        if looks_like_ref(&target) {
+            Locator {
+                ref_: Some(target),
+                ..empty_locator()
+            }
+        } else {
+            Locator {
+                css: Some(target),
+                ..empty_locator()
             }
         }
-        _ => Err(CliError::Local(anyhow::anyhow!(
-            "pass exactly one of: <target>, --ref, or --selector"
-        ))),
-    }
+    } else if flags.is_empty() {
+        if required {
+            return Err(CliError::Local(anyhow::anyhow!(
+                "missing target: pass <ref-or-css> or one of --ref/--css/--role/--label/--placeholder/--text/--test-id"
+            )));
+        }
+        return Ok(None);
+    } else {
+        Locator {
+            ref_: flags.ref_.clone(),
+            css: flags.css.clone(),
+            role: flags.role.clone(),
+            name: flags.name.clone(),
+            label: flags.label.clone(),
+            placeholder: flags.placeholder.clone(),
+            text: flags.text.clone(),
+            test_id: flags.test_id.clone(),
+            exact: flags.exact.then_some(true),
+        }
+    };
+    locator
+        .validate()
+        .map_err(|error| CliError::Local(anyhow::anyhow!(error)))?;
+    Ok(Some(locator))
+}
+
+fn empty_locator() -> Locator {
+    Locator::default()
 }
 
 // ---------------------------------------------------------------------------
@@ -101,16 +183,11 @@ fn split_target(
 
 #[derive(Debug, Clone, Args)]
 pub struct ClickArgs {
-    /// Snapshot ref (`@e3`, `e3`) or CSS selector. Optional when `--ref`/`--selector` is used.
+    /// Compatibility target: snapshot ref (`@e3`, `e3`) or CSS.
     pub target: Option<String>,
 
-    /// Force-treat the value as a snapshot ref (overrides positional detection).
-    #[arg(long = "ref")]
-    pub ref_: Option<String>,
-
-    /// Force-treat the value as a CSS selector.
-    #[arg(long = "selector")]
-    pub selector: Option<String>,
+    #[command(flatten)]
+    pub locator: LocatorFlags,
 
     #[arg(long)]
     pub session: String,
@@ -140,17 +217,13 @@ pub struct ClickArgs {
 
 pub fn dispatch_click(args: ClickArgs, format: Format) -> Result<(), CliError> {
     let info = ensure_daemon().context("ensure daemon is running")?;
-    let (ref_, selector) = split_target(
-        args.target.clone(),
-        args.ref_.clone(),
-        args.selector.clone(),
-    )?;
+    let target = build_locator(args.target.clone(), &args.locator, true)?
+        .expect("required locator must be present");
     let modifiers = parse_modifiers(&args.modifiers)
         .map_err(|e| CliError::Local(anyhow::anyhow!("--modifiers: {e}")))?;
     let params = ClickParams {
         session_id: args.session.clone(),
-        ref_,
-        selector,
+        target,
         tab_id: args.tab_id,
         button: Some(args.button.into()),
         click_count: Some(args.click_count),
@@ -177,8 +250,7 @@ pub fn dispatch_click(args: ClickArgs, format: Format) -> Result<(), CliError> {
             );
         }
         Format::Human => {
-            let target =
-                format_used_target(reply.used_ref.as_deref(), reply.used_selector.as_deref());
+            let target = format_locator(&reply.used_target);
             println!(
                 "click ok tab={} target={target} at=({}, {})",
                 reply.tab_id, reply.x, reply.y
@@ -195,7 +267,7 @@ pub fn dispatch_click(args: ClickArgs, format: Format) -> Result<(), CliError> {
 
 #[derive(Debug, Clone, Args)]
 pub struct FillArgs {
-    /// Snapshot ref (`@e3`, `e3`) or CSS selector. Optional when `--ref`/`--selector` is used.
+    /// Compatibility target: snapshot ref (`@e3`, `e3`) or CSS.
     #[arg(value_name = "TARGET")]
     pub target: Option<String>,
 
@@ -203,11 +275,8 @@ pub struct FillArgs {
     #[arg(long)]
     pub value: String,
 
-    #[arg(long = "ref")]
-    pub ref_: Option<String>,
-
-    #[arg(long = "selector")]
-    pub selector: Option<String>,
+    #[command(flatten)]
+    pub locator: LocatorFlags,
 
     #[arg(long)]
     pub session: String,
@@ -225,16 +294,12 @@ pub struct FillArgs {
 
 pub fn dispatch_fill(args: FillArgs, format: Format) -> Result<(), CliError> {
     let info = ensure_daemon().context("ensure daemon is running")?;
-    let (ref_, selector) = split_target(
-        args.target.clone(),
-        args.ref_.clone(),
-        args.selector.clone(),
-    )?;
+    let target = build_locator(args.target.clone(), &args.locator, true)?
+        .expect("required locator must be present");
     let params = FillParams {
         session_id: args.session.clone(),
         value: args.value.clone(),
-        ref_,
-        selector,
+        target,
         tab_id: args.tab_id,
         clear_before: if args.no_clear { Some(false) } else { None },
         timeout_ms: Some(args.timeout),
@@ -255,8 +320,7 @@ pub fn dispatch_fill(args: FillArgs, format: Format) -> Result<(), CliError> {
             );
         }
         Format::Human => {
-            let target =
-                format_used_target(reply.used_ref.as_deref(), reply.used_selector.as_deref());
+            let target = format_locator(&reply.used_target);
             println!(
                 "fill ok tab={} target={target} length={}",
                 reply.tab_id, reply.value_length
@@ -286,13 +350,9 @@ pub struct PressArgs {
     #[arg(long, default_value = "")]
     pub modifiers: String,
 
-    /// Optional snapshot ref to focus before dispatching the key.
-    #[arg(long = "ref")]
-    pub ref_: Option<String>,
-
-    /// Optional CSS selector to focus before dispatching the key.
-    #[arg(long = "selector")]
-    pub selector: Option<String>,
+    /// Optional locator to focus before dispatching the key.
+    #[command(flatten)]
+    pub locator: LocatorFlags,
 
     /// Hold the key down for N milliseconds between keyDown and keyUp.
     #[arg(long = "hold-ms")]
@@ -306,6 +366,7 @@ pub fn dispatch_press(args: PressArgs, format: Format) -> Result<(), CliError> {
     let info = ensure_daemon().context("ensure daemon is running")?;
     let modifiers = parse_modifiers(&args.modifiers)
         .map_err(|e| CliError::Local(anyhow::anyhow!("--modifiers: {e}")))?;
+    let target = build_locator(None, &args.locator, false)?;
     let params = PressParams {
         session_id: args.session.clone(),
         key: args.key.clone(),
@@ -314,8 +375,7 @@ pub fn dispatch_press(args: PressArgs, format: Format) -> Result<(), CliError> {
         } else {
             Some(modifiers)
         },
-        ref_: args.ref_.clone(),
-        selector: args.selector.clone(),
+        target,
         tab_id: args.tab_id,
         hold_ms: args.hold_ms,
         timeout_ms: Some(args.timeout),
@@ -365,7 +425,7 @@ pub fn dispatch_press(args: PressArgs, format: Format) -> Result<(), CliError> {
 
 #[derive(Debug, Clone, Args)]
 pub struct SelectArgs {
-    /// Snapshot ref (`@e3`, `e3`) or CSS selector. Optional when `--ref`/`--selector` is used.
+    /// Compatibility target: snapshot ref (`@e3`, `e3`) or CSS.
     #[arg(value_name = "TARGET")]
     pub target: Option<String>,
 
@@ -373,11 +433,8 @@ pub struct SelectArgs {
     #[arg(long = "value", required = true)]
     pub values: Vec<String>,
 
-    #[arg(long = "ref")]
-    pub ref_: Option<String>,
-
-    #[arg(long = "selector")]
-    pub selector: Option<String>,
+    #[command(flatten)]
+    pub locator: LocatorFlags,
 
     #[arg(long)]
     pub session: String,
@@ -391,16 +448,12 @@ pub struct SelectArgs {
 
 pub fn dispatch_select(args: SelectArgs, format: Format) -> Result<(), CliError> {
     let info = ensure_daemon().context("ensure daemon is running")?;
-    let (ref_, selector) = split_target(
-        args.target.clone(),
-        args.ref_.clone(),
-        args.selector.clone(),
-    )?;
+    let target = build_locator(args.target.clone(), &args.locator, true)?
+        .expect("required locator must be present");
     let params = SelectParams {
         session_id: args.session.clone(),
         values: args.values.clone(),
-        ref_,
-        selector,
+        target,
         tab_id: args.tab_id,
         timeout_ms: Some(args.timeout),
     };
@@ -420,8 +473,7 @@ pub fn dispatch_select(args: SelectArgs, format: Format) -> Result<(), CliError>
             );
         }
         Format::Human => {
-            let target =
-                format_used_target(reply.used_ref.as_deref(), reply.used_selector.as_deref());
+            let target = format_locator(&reply.used_target);
             let values = reply.selected_values.join(",");
             let labels = reply.selected_labels.join(",");
             println!(
@@ -434,11 +486,27 @@ pub fn dispatch_select(args: SelectArgs, format: Format) -> Result<(), CliError>
     Ok(())
 }
 
-fn format_used_target(used_ref: Option<&str>, used_selector: Option<&str>) -> String {
-    used_ref
-        .map(|r| format!("@{r}"))
-        .or_else(|| used_selector.map(str::to_string))
-        .unwrap_or_else(|| "?".into())
+fn format_locator(locator: &Locator) -> String {
+    if let Some(value) = &locator.ref_ {
+        return format!("ref={value}");
+    }
+    if let Some(value) = &locator.css {
+        return format!("css={value}");
+    }
+    if let (Some(role), Some(name)) = (&locator.role, &locator.name) {
+        return format!("role={role} name={name}");
+    }
+    for (kind, value) in [
+        ("label", locator.label.as_deref()),
+        ("placeholder", locator.placeholder.as_deref()),
+        ("text", locator.text.as_deref()),
+        ("testId", locator.test_id.as_deref()),
+    ] {
+        if let Some(value) = value {
+            return format!("{kind}={value}");
+        }
+    }
+    "?".into()
 }
 
 fn modifier_label(m: &KeyModifier) -> &'static str {
@@ -503,17 +571,58 @@ mod tests {
     }
 
     #[test]
-    fn split_target_picks_ref_path_for_ref_strings() {
-        let (r, s) = split_target(Some("@e3".into()), None, None).unwrap();
-        assert_eq!(r.as_deref(), Some("@e3"));
-        assert!(s.is_none());
+    fn build_locator_picks_ref_path_for_ref_strings() {
+        let locator = build_locator(Some("@e3".into()), &LocatorFlags::default(), true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(locator.ref_.as_deref(), Some("@e3"));
     }
 
     #[test]
-    fn split_target_picks_selector_for_anything_else() {
-        let (r, s) = split_target(Some(".btn".into()), None, None).unwrap();
-        assert!(r.is_none());
-        assert_eq!(s.as_deref(), Some(".btn"));
+    fn build_locator_picks_css_for_anything_else() {
+        let locator = build_locator(Some(".btn".into()), &LocatorFlags::default(), true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(locator.css.as_deref(), Some(".btn"));
+    }
+
+    #[test]
+    fn build_locator_accepts_role_name_and_exact() {
+        let flags = LocatorFlags {
+            role: Some("button".into()),
+            name: Some("Save".into()),
+            exact: true,
+            ..LocatorFlags::default()
+        };
+        let locator = build_locator(None, &flags, true).unwrap().unwrap();
+        assert_eq!(locator.role.as_deref(), Some("button"));
+        assert_eq!(locator.name.as_deref(), Some("Save"));
+        assert_eq!(locator.exact, Some(true));
+    }
+
+    #[test]
+    fn build_locator_rejects_missing_role_name_and_multiple_strategies() {
+        let missing_name = LocatorFlags {
+            role: Some("button".into()),
+            ..LocatorFlags::default()
+        };
+        assert!(build_locator(None, &missing_name, true).is_err());
+
+        let multiple = LocatorFlags {
+            label: Some("Email".into()),
+            placeholder: Some("name@example.com".into()),
+            ..LocatorFlags::default()
+        };
+        assert!(build_locator(None, &multiple, true).is_err());
+    }
+
+    #[test]
+    fn build_locator_rejects_positional_target_with_locator_flags() {
+        let flags = LocatorFlags {
+            text: Some("Save".into()),
+            ..LocatorFlags::default()
+        };
+        assert!(build_locator(Some("button".into()), &flags, true).is_err());
     }
 
     #[test]

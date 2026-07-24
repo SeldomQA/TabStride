@@ -286,6 +286,42 @@ fn parses_click_count_alias() {
 }
 
 #[test]
+fn parses_semantic_locator_flags() {
+    let cli = parse(&[
+        "tabstride",
+        "click",
+        "--role",
+        "button",
+        "--name",
+        "Save",
+        "--exact",
+        "--session",
+        "abcd",
+    ]);
+    let Command::Click(args) = cli.command else {
+        panic!("expected click command");
+    };
+    assert_eq!(args.locator.role.as_deref(), Some("button"));
+    assert_eq!(args.locator.name.as_deref(), Some("Save"));
+    assert!(args.locator.exact);
+
+    let cli = parse(&[
+        "tabstride",
+        "fill",
+        "--label",
+        "Email",
+        "--value",
+        "user@example.com",
+        "--session",
+        "abcd",
+    ]);
+    let Command::Fill(args) = cli.command else {
+        panic!("expected fill command");
+    };
+    assert_eq!(args.locator.label.as_deref(), Some("Email"));
+}
+
+#[test]
 fn rejects_zero_click_count() {
     assert!(
         Cli::try_parse_from([

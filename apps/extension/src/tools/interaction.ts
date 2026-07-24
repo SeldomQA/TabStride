@@ -2,9 +2,8 @@
 // `tool.select`.
 //
 // All interaction tools:
-// 1. Resolve target tab (sandbox: must be inside Agent Window).
-// 2. Resolve target element by `ref` (RefStore.resolve with tabId
-//    binding) or `selector` (DOM.querySelector + describeNode).
+// 1. Resolve the target tab within the isolated or attach session scope.
+// 2. Resolve exactly one element through the shared Locator resolver.
 // 3. Scroll the node into view, then dispatch the appropriate
 //    `Input.*` CDP events.
 // 4. Honour `AbortSignal` so canceled calls don't issue follow-up CDP
@@ -34,6 +33,7 @@ import {
   scrollNodeIntoView,
 } from "./element-geometry";
 import { rpcError } from "./errors";
+import { resolveLocator } from "./locator";
 import {
   type CdpRunner,
   type ChromeTabsApi,
@@ -43,7 +43,6 @@ import {
   lookupSession,
   resolveTargetTab,
 } from "./shared";
-import { resolveSnapshotRef } from "./snapshot-ref";
 
 export interface InteractionDeps {
   cdp: CdpRunner;
@@ -100,81 +99,6 @@ function throwIfAborted(signal: AbortSignal | undefined): RpcError | null {
   return null;
 }
 
-/**
- * Resolve `{ref?, selector?}` into a `backendNodeId`. Returns an
- * `RpcError` if the caller supplied neither (or both), or if neither
- * lookup matched.
- */
-async function resolveBackendNode(
-  cdp: CdpRunner,
-  ctx: SessionContext,
-  target: { tabId: number },
-  params: { ref?: string; selector?: string },
-  toolName: string,
-): Promise<{ backendNodeId: number; usedRef?: string; usedSelector?: string } | RpcError> {
-  const hasRef = typeof params.ref === "string" && params.ref.length > 0;
-  const hasSelector = typeof params.selector === "string" && params.selector.length > 0;
-  if (hasRef && hasSelector) {
-    return {
-      code: "invalid_params",
-      message: `${toolName}: pass either ref or selector, not both`,
-    };
-  }
-  if (!hasRef && !hasSelector) {
-    return {
-      code: "invalid_params",
-      message: `${toolName} requires a ref or a selector`,
-    };
-  }
-  if (hasRef) {
-    const resolved = resolveSnapshotRef(ctx, params.ref as string, target.tabId);
-    if (isRpcError(resolved)) return resolved;
-    return { backendNodeId: resolved.backendNodeId, usedRef: resolved.refKey };
-  }
-  // selector path
-  try {
-    const doc = await cdp.send<{ root?: { nodeId?: number } }>(target.tabId, "DOM.getDocument", {
-      depth: 0,
-    });
-    const rootNodeId = doc.root?.nodeId;
-    if (typeof rootNodeId !== "number") {
-      return {
-        code: "cdp_failed",
-        message: "DOM.getDocument returned no root nodeId",
-      };
-    }
-    const found = await cdp.send<{ nodeId?: number }>(target.tabId, "DOM.querySelector", {
-      nodeId: rootNodeId,
-      selector: params.selector,
-    });
-    if (typeof found.nodeId !== "number" || found.nodeId === 0) {
-      return rpcError(
-        "not_found",
-        "selector_not_found",
-        `selector ${params.selector} did not match any element`,
-      );
-    }
-    const described = await cdp.send<{ node?: { backendNodeId?: number } }>(
-      target.tabId,
-      "DOM.describeNode",
-      { nodeId: found.nodeId },
-    );
-    const backendNodeId = described.node?.backendNodeId;
-    if (typeof backendNodeId !== "number") {
-      return {
-        code: "cdp_failed",
-        message: "DOM.describeNode returned no backendNodeId",
-      };
-    }
-    return { backendNodeId, usedSelector: params.selector };
-  } catch (err) {
-    return {
-      code: "cdp_failed",
-      message: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
 // ---------------------------------------------------------------------------
 // tool.click
 // ---------------------------------------------------------------------------
@@ -195,7 +119,7 @@ export async function handleClick(
   if (denied) return denied;
   const dialogCursor = markDialogCursor(deps.cdp, target.tabId);
 
-  const node = await resolveBackendNode(deps.cdp, ctx, target, params, "click");
+  const node = await resolveLocator(deps.cdp, ctx, target.tabId, params.target);
   if (isRpcError(node)) return node;
 
   if (throwIfAborted(deps.signal)) {
@@ -297,8 +221,9 @@ export async function handleClick(
 
   return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
     tab_id: target.tabId,
-    used_ref: node.usedRef,
-    used_selector: node.usedSelector,
+    used_target: node.usedTarget,
+    used_ref: node.usedTarget.ref,
+    used_selector: node.usedTarget.css,
     x: centre.x,
     y: centre.y,
   });
@@ -460,7 +385,7 @@ export async function handleFill(
   if (denied) return denied;
   const dialogCursor = markDialogCursor(deps.cdp, target.tabId);
 
-  const node = await resolveBackendNode(deps.cdp, ctx, target, params, "fill");
+  const node = await resolveLocator(deps.cdp, ctx, target.tabId, params.target);
   if (isRpcError(node)) return node;
 
   try {
@@ -549,8 +474,9 @@ export async function handleFill(
 
   return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
     tab_id: target.tabId,
-    used_ref: node.usedRef,
-    used_selector: node.usedSelector,
+    used_target: node.usedTarget,
+    used_ref: node.usedTarget.ref,
+    used_selector: node.usedTarget.css,
     value_length: params.value.length,
   });
 }
@@ -726,10 +652,12 @@ export async function handlePress(
     };
   }
 
+  let usedTarget: PressResult["used_target"];
   // Optional focus before key dispatch.
-  if (params.ref || params.selector) {
-    const node = await resolveBackendNode(deps.cdp, ctx, target, params, "press");
+  if (params.target) {
+    const node = await resolveLocator(deps.cdp, ctx, target.tabId, params.target);
     if (isRpcError(node)) return node;
+    usedTarget = node.usedTarget;
     try {
       deps.cdp.trackSessionTab?.(ctx.sessionId, target.tabId);
       const scrollErr = await scrollNodeIntoView(deps.cdp, target.tabId, node.backendNodeId);
@@ -810,6 +738,7 @@ export async function handlePress(
     key: descriptor.key,
     code: descriptor.code,
     modifiers: mods,
+    used_target: usedTarget,
   });
 }
 
@@ -840,7 +769,7 @@ export async function handleSelect(
   if (denied) return denied;
   const dialogCursor = markDialogCursor(deps.cdp, target.tabId);
 
-  const node = await resolveBackendNode(deps.cdp, ctx, target, params, "select");
+  const node = await resolveLocator(deps.cdp, ctx, target.tabId, params.target);
   if (isRpcError(node)) return node;
 
   try {
@@ -933,8 +862,9 @@ export async function handleSelect(
     }
     return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
       tab_id: target.tabId,
-      used_ref: node.usedRef,
-      used_selector: node.usedSelector,
+      used_target: node.usedTarget,
+      used_ref: node.usedTarget.ref,
+      used_selector: node.usedTarget.css,
       multiple: mutation.multiple,
       selected_values: mutation.selected_values,
       selected_labels: mutation.selected_labels,
@@ -951,7 +881,6 @@ export const __testing__ = {
   DEFAULT_TIMEOUT_MS,
   quadCentre,
   boxCentre,
-  resolveBackendNode,
   nodeCentre,
   isFillable,
 };

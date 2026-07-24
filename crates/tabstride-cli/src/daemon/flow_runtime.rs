@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use serde_json::{Map, Value};
+use serde_json::Value;
 use tabstride_protocol::{
     ErrorCode, FlowDefinition, FlowFailureData, FlowRunParams, FlowRunResult, FlowStep,
     FlowStepResult, Method, ResponseBody, RpcError, RpcId,
@@ -156,34 +156,22 @@ impl FlowStepExt for FlowStep {
 
     fn into_params(self, session_id: &str) -> Value {
         match self {
-            Self::Navigate(entry) => with_session(entry.navigate, session_id, false),
-            Self::Click(entry) => with_session(entry.click, session_id, true),
-            Self::Fill(entry) => with_session(entry.fill, session_id, true),
-            Self::Press(entry) => with_session(entry.press, session_id, true),
-            Self::Snapshot(entry) => with_session(entry.snapshot, session_id, false),
+            Self::Navigate(entry) => with_session(entry.navigate, session_id),
+            Self::Click(entry) => with_session(entry.click, session_id),
+            Self::Fill(entry) => with_session(entry.fill, session_id),
+            Self::Press(entry) => with_session(entry.press, session_id),
+            Self::Snapshot(entry) => with_session(entry.snapshot, session_id),
             Self::WaitMs(entry) => serde_json::to_value(entry.wait_ms).unwrap_or(Value::Null),
         }
     }
 }
 
-fn with_session<T: Serialize>(step: T, session_id: &str, flatten: bool) -> Value {
+fn with_session<T: Serialize>(step: T, session_id: &str) -> Value {
     let mut value = serde_json::to_value(step).unwrap_or(Value::Null);
     if let Value::Object(object) = &mut value {
         object.insert("session_id".into(), Value::String(session_id.into()));
-        if flatten && let Some(Value::Object(target)) = object.remove("target") {
-            flatten_target(object, target);
-        }
     }
     value
-}
-
-fn flatten_target(params: &mut Map<String, Value>, mut target: Map<String, Value>) {
-    if let Some(value) = target.remove("ref") {
-        params.insert("ref".into(), value);
-    }
-    if let Some(value) = target.remove("css") {
-        params.insert("selector".into(), value);
-    }
 }
 
 fn expand_variables(

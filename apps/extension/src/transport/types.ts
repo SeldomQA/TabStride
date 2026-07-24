@@ -10,6 +10,7 @@ export type ErrorCode =
   | "unsupported"
   | "invalid_params"
   | "not_found"
+  | "ambiguous_target"
   | "permission_denied"
   | "timeout"
   | "cdp_failed"
@@ -26,6 +27,8 @@ export type RpcErrorReason =
   | "element_not_visible"
   | "ref_not_found"
   | "selector_not_found"
+  | "locator_not_found"
+  | "ambiguous_target"
   | "target_not_fillable"
   | "target_not_select"
   | "option_not_found"
@@ -356,10 +359,21 @@ export type ReloadResult = NavigateHistoryResult;
 export type MouseButton = "left" | "middle" | "right";
 export type KeyModifier = "alt" | "ctrl" | "meta" | "shift";
 
+export interface Locator {
+  ref?: string;
+  css?: string;
+  role?: string;
+  name?: string;
+  label?: string;
+  placeholder?: string;
+  text?: string;
+  testId?: string;
+  exact?: boolean;
+}
+
 export interface ClickParams {
   session_id: string;
-  ref?: string;
-  selector?: string;
+  target?: Locator;
   tab_id?: number;
   button?: MouseButton;
   click_count?: number;
@@ -369,6 +383,7 @@ export interface ClickParams {
 
 export interface ClickResult {
   tab_id: number;
+  used_target: Locator;
   used_ref?: string;
   used_selector?: string;
   x: number;
@@ -379,8 +394,7 @@ export interface ClickResult {
 export interface FillParams {
   session_id: string;
   value: string;
-  ref?: string;
-  selector?: string;
+  target?: Locator;
   tab_id?: number;
   clear_before?: boolean;
   timeout_ms?: number;
@@ -388,6 +402,7 @@ export interface FillParams {
 
 export interface FillResult {
   tab_id: number;
+  used_target: Locator;
   used_ref?: string;
   used_selector?: string;
   value_length: number;
@@ -398,8 +413,7 @@ export interface PressParams {
   session_id: string;
   key: string;
   modifiers?: KeyModifier[];
-  ref?: string;
-  selector?: string;
+  target?: Locator;
   tab_id?: number;
   hold_ms?: number;
   timeout_ms?: number;
@@ -410,20 +424,21 @@ export interface PressResult {
   key: string;
   code: string;
   modifiers: KeyModifier[];
+  used_target?: Locator;
   dialogs?: JavaScriptDialogInfo[];
 }
 
 export interface SelectParams {
   session_id: string;
   values: string[];
-  ref?: string;
-  selector?: string;
+  target?: Locator;
   tab_id?: number;
   timeout_ms?: number;
 }
 
 export interface SelectResult {
   tab_id: number;
+  used_target: Locator;
   used_ref?: string;
   used_selector?: string;
   multiple: boolean;
