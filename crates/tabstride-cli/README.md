@@ -38,6 +38,18 @@ tabstride flow run examples/flows/todomvc.yaml --session abcd --var task="write 
 
 Flow v1 runs `navigate`, `click`, `fill`, `press`, `snapshot`, and `wait_ms` through the existing
 session queue. It stops at the first failure, reports per-step timings, and propagates timeout and
-cancel to the active child operation.
+cancel to the active child operation. Interaction targets share the same strict Locator in CLI and
+Flow: exactly one of `ref`, `css`, `role` + `name`, `label`, `placeholder`, `text`, or `testId`,
+with optional `exact` for semantic matching. Zero matches return `not_found`; multiple matches
+return `ambiguous_target`.
+
+Examples:
+
+```bash
+tabstride click --role button --name Save --exact --session abcd
+tabstride fill --label Email --value agent@example.com --session abcd
+tabstride press Enter --placeholder "Add a task" --session abcd
+tabstride select --test-id country --value SG --session abcd
+```
 
 Documentation: [../../README.md](../../README.md) · [../../docs/architecture.md](../../docs/architecture.md)

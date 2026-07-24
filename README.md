@@ -169,6 +169,24 @@ sibling tabs, or permit tab-management commands such as `tab create`, `tab close
 and `tab return`. Stopping the session detaches browser control and removes the control overlay,
 while leaving the user's tab and window open. Always stop the session, including after errors.
 
+### Locate elements reliably
+
+`click`, `fill`, `press`, and `select` share one strict Locator model. Use one of a snapshot `ref`,
+`css`, `role` + accessible `name`, `label`, `placeholder`, visible `text`, or `testId`. Add
+`--exact` to semantic locators when substring matching is too broad:
+
+```bash
+tabstride click --role button --name Save --exact --session "$session_id"
+tabstride fill --label Email --value agent@example.com --session "$session_id"
+tabstride press Enter --placeholder "Add a task" --session "$session_id"
+tabstride select --test-id country --value SG --session "$session_id"
+```
+
+The compatibility positional form remains available for refs and CSS, such as
+`tabstride click @e3` or `tabstride click '#submit'`. Every Locator is strict: zero matches returns
+`not_found`, one match proceeds, and multiple matches return `ambiguous_target` instead of silently
+using the first element.
+
 ### Persistent Agent client
 
 Agent harnesses that can keep a child process alive should use `tabstride client`. It performs one
@@ -200,8 +218,9 @@ Flow v1 supports `navigate`, `click`, `fill`, `press`, `snapshot`, and daemon-si
 Steps run in order through the same session queue as individual CLI commands; the first failure
 stops the flow and reports the failed step plus completed-step timings. A total `timeout` and each
 tool's `timeout_ms` are independent, and Ctrl+C cancels the active step and the remaining flow.
-Targets use exactly one of `css` or `ref`; semantic locators and assertions belong to the next
-reliable-execution phase.
+Flow targets use the same Locator object and execution path as individual commands. For example,
+`target: { role: button, name: Save, exact: true }` has identical matching, errors, scope, and
+timeout behavior.
 
 Business requests are logged without their payloads:
 
