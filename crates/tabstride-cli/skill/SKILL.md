@@ -70,9 +70,10 @@ tabstride flow run <flow.yaml> --session <id> --var key=value
 ```
 
 Use Flow v1 only for deterministic `navigate`, `click`, `fill`, `press`, `snapshot`, and `wait_ms`
-steps. Targets contain exactly one `css` or `ref`. A flow stops on its first failure; do not rewrite
-or skip the failed step silently. Ctrl+C cancels the active step and the rest of the flow. Continue
-to use individual commands when the next action depends on inspecting the preceding result.
+steps. Flow and individual commands use the same strict Locator and execution path. A flow stops on
+its first failure; do not rewrite or skip the failed step silently. Ctrl+C cancels the active step
+and the rest of the flow. Continue to use individual commands when the next action depends on
+inspecting the preceding result.
 
 ## Core interaction loop
 
@@ -87,7 +88,11 @@ tabstride snapshot --session <id>            → again after navigation / DOM ch
 
 **Refs invalidate after navigation** — always re-snapshot before clicking, filling, or selecting on a new page.
 
-Prefer `@eN` refs from the latest snapshot over raw CSS selectors. Use `--ref` / `--selector` when ambiguous (`tabstride click --help`).
+Prefer `@eN` refs from the latest snapshot. When a stable ref is unavailable, pass exactly one
+semantic locator (`--role` + `--name`, `--label`, `--placeholder`, `--text`, or `--test-id`) or
+`--css`. Add `--exact` only to semantic locators. A locator must match exactly one element: handle
+`not_found` by re-snapshotting or correcting the target, and handle `ambiguous_target` by making the
+locator more specific. Never rely on the first match.
 
 ## Observation priority
 
@@ -183,10 +188,19 @@ Details and flags: **`tabstride <cmd> --help`**
 
 | Command | Summary |
 |---------|---------|
-| `tabstride click <ref-or-selector>` | Click element (`--button`, `--click-count`, `--modifiers`) |
-| `tabstride fill <ref-or-selector> --value <text>` | Clear and type into input |
-| `tabstride select <ref-or-selector> --value <v>` | Set `<select>` option(s) by `value` (repeat `--value` for multi-select) |
-| `tabstride press <key>` | Key/combo (`Enter`, `Ctrl+A`, …; optional `--ref` to focus first) |
+| `tabstride click <ref-or-css>` | Click one strict target; also accepts semantic Locator flags (`--button`, `--click-count`, `--modifiers`) |
+| `tabstride fill <ref-or-css> --value <text>` | Clear and type into one strict target; also accepts semantic Locator flags |
+| `tabstride select <ref-or-css> --value <v>` | Set one strict `<select>` target by `value`; repeat `--value` for multi-select |
+| `tabstride press <key>` | Key/combo (`Enter`, `Ctrl+A`, …); optional ref, CSS, or semantic Locator focuses one target first |
+
+Locator examples:
+
+```
+tabstride click --role button --name Save --exact --session <id>
+tabstride fill --label Email --value agent@example.com --session <id>
+tabstride press Enter --placeholder "Add a task" --session <id>
+tabstride select --test-id country --value SG --session <id>
+```
 
 ### Scripting & timing
 
