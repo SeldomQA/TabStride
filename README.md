@@ -169,6 +169,11 @@ sibling tabs, or permit tab-management commands such as `tab create`, `tab close
 and `tab return`. Stopping the session detaches browser control and removes the control overlay,
 while leaving the user's tab and window open. Always stop the session, including after errors.
 
+The Chrome extension popup always includes a collapsible **AI operation logs** panel and keeps the
+latest 100 operations across sessions. While a session is active, the in-page control overlay also
+offers the same live log view. Entries show running/success/failure state, safe target summaries,
+and duration. Logs never include fill values, evaluated scripts, page content, or URL query data.
+
 ### Locate elements reliably
 
 `click`, `fill`, `press`, and `select` share one strict Locator model. Use one of a snapshot `ref`,
