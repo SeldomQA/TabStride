@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="520" viewBox="0 0 1536 520" role="img" aria-labelledby="title desc">
+  <title id="title">TabStride architecture</title>
+  <desc id="desc">AI agents call the TabStride CLI over local IPC. The visible TabStride service manages sessions and forwards requests over WebSocket to the browser extension, which controls a separate Agent Window through CDP.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071426"/>
+      <stop offset="1" stop-color="#0b1024"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="0.55" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1 1l10 5-10 5z" fill="#22d3ee"/>
+    </marker>
+    <style>
+      .sans{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+      .mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace}
+      .panel{fill:#0d1b30;stroke:#263b57;stroke-width:2}
+      .minor{fill:#8ea4bf;font-size:16px}
+      .label{fill:#dbeafe;font-size:20px;font-weight:700}
+      .chip{fill:#101f36;stroke:#2b4765;stroke-width:1.5}
+    </style>
+  </defs>
+
+  <rect width="1536" height="520" rx="32" fill="url(#bg)"/>
+  <path d="M0 86H1536M0 434H1536" stroke="#16304c" stroke-width="1" opacity=".55"/>
+  <path d="M90 0V520M1446 0V520" stroke="#16304c" stroke-width="1" opacity=".4"/>
+
+  <!-- Brand -->
+  <g transform="translate(54 34)">
+    <g transform="scale(.48)">
+      <path d="M0 46Q0 30 16 30h42l13 13h35q16 0 16 16v42q0 16-16 16H73V79H49v38H16Q0 117 0 101z" fill="#22d3ee"/>
+      <path d="M34 22Q34 6 50 6h42l13 13h35q16 0 16 16v42q0 16-16 16h-33V55H83v38H50Q34 93 34 77z" fill="#6366f1"/>
+      <path d="M68 0q0-16 16-16h42l13 13h35q16 0 16 16v42q0 16-16 16h-33V33h-24v38H84Q68 71 68 55z" fill="#34d399"/>
+    </g>
+    <text class="sans" x="108" y="38" fill="#f8fafc" font-size="34" font-weight="800" letter-spacing="-.8">TabStride</text>
+    <text class="sans" x="108" y="64" fill="#8ea4bf" font-size="15">A visible local bridge from AI agents to your real browser</text>
+  </g>
+
+  <!-- Agent / CLI -->
+  <g transform="translate(54 136)">
+    <rect class="panel" width="342" height="250" rx="24"/>
+    <rect x="1" y="1" width="340" height="48" rx="23" fill="#111f35"/>
+    <circle cx="25" cy="25" r="5" fill="#fb7185"/><circle cx="44" cy="25" r="5" fill="#fbbf24"/><circle cx="63" cy="25" r="5" fill="#34d399"/>
+    <text class="sans label" x="24" y="86">AI Agent</text>
+    <text class="sans minor" x="24" y="111">Any shell-capable agent</text>
+    <g transform="translate(24 137)">
+      <rect class="chip" width="294" height="38" rx="9"/>
+      <text class="mono" x="14" y="25" fill="#67e8f9" font-size="14">tabstride snapshot --session …</text>
+      <rect class="chip" y="50" width="294" height="38" rx="9"/>
+      <text class="mono" x="14" y="75" fill="#a5b4fc" font-size="14">tabstride click @e12 …</text>
+    </g>
+  </g>
+
+  <!-- Serve -->
+  <g transform="translate(530 115)">
+    <rect x="0" y="0" width="446" height="292" rx="28" fill="#0b2238" stroke="#22d3ee" stroke-width="2.5"/>
+    <rect x="18" y="18" width="410" height="56" rx="15" fill="#102e46"/>
+    <circle cx="47" cy="46" r="9" fill="#34d399" filter="url(#glow)"/>
+    <text class="mono" x="70" y="52" fill="#f0fdfa" font-size="20" font-weight="700">tabstride serve</text>
+    <text class="sans" x="22" y="102" fill="#67e8f9" font-size="15" font-weight="700" letter-spacing="1.5">VISIBLE LOCAL SERVICE</text>
+    <g transform="translate(22 124)">
+      <rect class="chip" width="194" height="54" rx="12"/><text class="sans" x="16" y="23" fill="#dbeafe" font-size="15" font-weight="700">IPC endpoint</text><text class="sans" x="16" y="42" fill="#7891ad" font-size="12">CLI requests</text>
+      <rect class="chip" x="208" width="194" height="54" rx="12"/><text class="sans" x="224" y="23" fill="#dbeafe" font-size="15" font-weight="700">Session manager</text><text class="sans" x="224" y="42" fill="#7891ad" font-size="12">isolated Agent Windows</text>
+      <rect class="chip" y="68" width="194" height="54" rx="12"/><text class="sans" x="16" y="91" fill="#dbeafe" font-size="15" font-weight="700">Request queue</text><text class="sans" x="16" y="110" fill="#7891ad" font-size="12">ordered dispatch</text>
+      <rect class="chip" x="208" y="68" width="194" height="54" rx="12"/><text class="sans" x="224" y="91" fill="#dbeafe" font-size="15" font-weight="700">Timing + logs</text><text class="sans" x="224" y="110" fill="#7891ad" font-size="12">observable execution</text>
+    </g>
+    <text class="sans" x="223" y="273" fill="#8ea4bf" font-size="13" text-anchor="middle">Start once · Ctrl+C stops the service</text>
+  </g>
+
+  <!-- Browser -->
+  <g transform="translate(1110 118)">
+    <rect class="panel" width="372" height="286" rx="24"/>
+    <rect x="1" y="1" width="370" height="50" rx="23" fill="#111f35"/>
+    <circle cx="25" cy="25" r="5" fill="#fb7185"/><circle cx="44" cy="25" r="5" fill="#fbbf24"/><circle cx="63" cy="25" r="5" fill="#34d399"/>
+    <path d="M102 50v-22q0-12 12-12h88q12 0 12 12v22" fill="#172a45"/>
+    <text class="sans label" x="24" y="89">Chrome Extension</text>
+    <text class="sans minor" x="24" y="114">Stable 8-digit instance ID</text>
+    <rect x="24" y="139" width="324" height="112" rx="16" fill="#0a1728" stroke="#263b57" stroke-width="1.5"/>
+    <rect x="42" y="157" width="126" height="76" rx="12" fill="#132d48"/>
+    <path d="M58 180h92M58 197h72M58 214h83" stroke="#3c5978" stroke-width="7" stroke-linecap="round"/>
+    <text class="sans" x="188" y="178" fill="#34d399" font-size="14" font-weight="700">Agent Window</text>
+    <text class="sans" x="188" y="201" fill="#8ea4bf" font-size="13">CDP-controlled</text>
+    <text class="sans" x="188" y="222" fill="#8ea4bf" font-size="13">real login state</text>
+    <text class="sans" x="186" y="273" fill="#67e8f9" font-size="13" text-anchor="middle">Your other tabs remain untouched</text>
+  </g>
+
+  <!-- Connections -->
+  <path d="M396 254H514" stroke="#22d3ee" stroke-width="3" stroke-dasharray="8 8" marker-end="url(#arrow)"/>
+  <rect x="420" y="218" width="73" height="26" rx="13" fill="#0b1729" stroke="#21415e"/>
+  <text class="sans" x="456" y="236" fill="#8ea4bf" font-size="12" text-anchor="middle">Local IPC</text>
+
+  <path d="M976 254H1094" stroke="#22d3ee" stroke-width="3" stroke-dasharray="8 8" marker-end="url(#arrow)"/>
+  <rect x="995" y="218" width="82" height="26" rx="13" fill="#0b1729" stroke="#21415e"/>
+  <text class="sans" x="1036" y="236" fill="#8ea4bf" font-size="12" text-anchor="middle">WebSocket</text>
+
+  <g transform="translate(418 454)">
+    <rect width="700" height="38" rx="19" fill="#0a192c" stroke="#1f3854"/>
+    <circle cx="27" cy="19" r="5" fill="#22d3ee"/><text class="sans" x="42" y="24" fill="#9fb2ca" font-size="14">Explicit service lifecycle</text>
+    <circle cx="235" cy="19" r="5" fill="#6366f1"/><text class="sans" x="250" y="24" fill="#9fb2ca" font-size="14">Visible request timing</text>
+    <circle cx="447" cy="19" r="5" fill="#34d399"/><text class="sans" x="462" y="24" fill="#9fb2ca" font-size="14">Isolated browser control</text>
+  </g>
+</svg>
