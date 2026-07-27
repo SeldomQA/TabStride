@@ -29,6 +29,7 @@ describe("App", () => {
   beforeEach(() => {
     mockUseConnectionState.mockReturnValue({
       snapshot: baseSnapshot,
+      operationLogs: [],
       statusState: "disconnected",
       setConnectionEnabled,
     });
@@ -72,6 +73,7 @@ describe("App", () => {
           protocol_version: "1.0",
         },
       },
+      operationLogs: [],
       statusState: "connected",
       setConnectionEnabled,
     });
@@ -110,6 +112,7 @@ describe("App", () => {
   it("shows disabled status when connection is turned off", () => {
     mockUseConnectionState.mockReturnValue({
       snapshot: { ...baseSnapshot, connectionEnabled: false },
+      operationLogs: [],
       statusState: "disabled",
       setConnectionEnabled,
     });
@@ -120,5 +123,37 @@ describe("App", () => {
     expect(
       screen.getByRole("switch", { name: "TabStride 连接" }).getAttribute("aria-checked"),
     ).toBe("false");
+  });
+
+  it("shows a collapsible operation log inside the extension popup", () => {
+    mockUseConnectionState.mockReturnValue({
+      snapshot: { ...baseSnapshot, state: "connected" },
+      operationLogs: [
+        {
+          id: "rpc-1",
+          sessionId: "abcd",
+          method: "tool.click",
+          status: "succeeded",
+          detail: "role=button name=Save",
+          startedAtMs: Date.now(),
+          durationMs: 12,
+        },
+      ],
+      statusState: "connected",
+      setConnectionEnabled,
+    });
+
+    const { container } = render(<App />);
+    const toggle = container.querySelector("[data-slot='popup-operation-logs-toggle']");
+    expect(toggle).toBeTruthy();
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector("[data-slot='popup-operation-logs-list']")).toBeNull();
+
+    fireEvent.click(toggle!);
+
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    expect(container.querySelector("[data-slot='popup-operation-logs-list']")).toBeTruthy();
+    expect(screen.getByText("点击元素")).toBeTruthy();
+    expect(screen.getByText("role=button name=Save")).toBeTruthy();
   });
 });

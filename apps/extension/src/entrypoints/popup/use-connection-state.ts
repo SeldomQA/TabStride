@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SnapshotInfo } from "@/lib/connection-controller";
+import type { OverlayOperationLogEntry } from "@/lib/overlay-bridge";
 import { POPUP_PORT_NAME, type PopupInbound, type PopupOutbound } from "@/lib/popup-bridge";
 import type { ConnectionState } from "@/transport/types";
 
@@ -48,10 +49,12 @@ const FALLBACK_SNAPSHOT: SnapshotInfo = {
  */
 export function useConnectionState(): {
   snapshot: SnapshotInfo;
+  operationLogs: OverlayOperationLogEntry[];
   statusState: PopupStatusState;
   setConnectionEnabled: (value: boolean) => void;
 } {
   const [snapshot, setSnapshot] = useState<SnapshotInfo>(FALLBACK_SNAPSHOT);
+  const [operationLogs, setOperationLogs] = useState<OverlayOperationLogEntry[]>([]);
   const portRef = useRef<chrome.runtime.Port | null>(null);
   const lastStableRef = useRef<ConnectionState>("disconnected");
 
@@ -64,6 +67,7 @@ export function useConnectionState(): {
     const onMessage = (raw: unknown) => {
       const msg = raw as PopupInbound;
       if (msg?.kind === "snapshot") setSnapshot(msg.data);
+      if (msg?.kind === "operation_logs") setOperationLogs(msg.data);
     };
     port.onMessage.addListener(onMessage);
     port.onDisconnect.addListener(() => {
@@ -93,6 +97,7 @@ export function useConnectionState(): {
 
   return {
     snapshot,
+    operationLogs,
     statusState,
     setConnectionEnabled: (value: boolean) => post({ kind: "set_connection_enabled", value }),
   };

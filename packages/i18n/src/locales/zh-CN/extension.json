@@ -42,7 +42,41 @@
   "controlOverlay": {
     "status": "Agent 正在控制",
     "interrupt": "中断",
-    "interrupting": "中断中…"
+    "interrupting": "中断中…",
+    "log": "日志",
+    "logTitle": "AI 操作日志",
+    "logCount": "{{count}} 条操作",
+    "logEmpty": "等待 AI 执行操作…",
+    "logStatus": {
+      "running": "执行中",
+      "succeeded": "已完成",
+      "failed": "失败"
+    },
+    "operations": {
+      "session_start": "启动会话",
+      "session_stop": "停止会话",
+      "navigate": "访问页面",
+      "navigate_back": "后退",
+      "navigate_forward": "前进",
+      "reload": "刷新页面",
+      "snapshot": "读取页面",
+      "screenshot": "截取页面",
+      "get_html": "读取 HTML",
+      "console": "读取控制台",
+      "click": "点击元素",
+      "fill": "填写输入框",
+      "press": "按下按键",
+      "select": "选择选项",
+      "evaluate": "执行脚本",
+      "wait_for_navigation": "等待页面",
+      "request_help": "请求人工协助",
+      "tab_list": "读取标签页",
+      "tab_create": "创建标签页",
+      "tab_close": "关闭标签页",
+      "tab_select": "切换标签页",
+      "tab_borrow": "借用标签页",
+      "tab_return": "归还标签页"
+    }
   },
   "borrowConfirmation": {
     "title": "允许借用标签页？",

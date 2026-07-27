@@ -42,7 +42,41 @@
   "controlOverlay": {
     "status": "Agent controlling",
     "interrupt": "Interrupt",
-    "interrupting": "Interrupting…"
+    "interrupting": "Interrupting…",
+    "log": "Logs",
+    "logTitle": "AI operation logs",
+    "logCount": "{{count}} operations",
+    "logEmpty": "Waiting for the next AI operation…",
+    "logStatus": {
+      "running": "Running",
+      "succeeded": "Done",
+      "failed": "Failed"
+    },
+    "operations": {
+      "session_start": "Start session",
+      "session_stop": "Stop session",
+      "navigate": "Navigate",
+      "navigate_back": "Go back",
+      "navigate_forward": "Go forward",
+      "reload": "Reload",
+      "snapshot": "Read page",
+      "screenshot": "Screenshot",
+      "get_html": "Read HTML",
+      "console": "Read console",
+      "click": "Click",
+      "fill": "Fill",
+      "press": "Press key",
+      "select": "Select",
+      "evaluate": "Run script",
+      "wait_for_navigation": "Wait for page",
+      "request_help": "Request help",
+      "tab_list": "List tabs",
+      "tab_create": "Create tab",
+      "tab_close": "Close tab",
+      "tab_select": "Select tab",
+      "tab_borrow": "Borrow tab",
+      "tab_return": "Return tab"
+    }
   },
   "borrowConfirmation": {
     "title": "Allow tab borrow?",

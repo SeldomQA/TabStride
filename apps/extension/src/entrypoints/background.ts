@@ -6,12 +6,15 @@ import {
   setConnectionEnabled as persistConnectionEnabled,
 } from "@/lib/instance-id";
 import { startKeepalive } from "@/lib/keepalive";
+import { OperationLogStore } from "@/lib/operation-log";
 import {
   OVERLAY_MSG_INTERRUPT,
   OVERLAY_MSG_WHO_AM_I,
+  OVERLAY_OPERATION_LOGS,
   type OverlayInterruptRequest,
   type OverlayInterruptResponse,
   type OverlayMessage,
+  type OverlayOperationLogEntry,
 } from "@/lib/overlay-bridge";
 import { POPUP_PORT_NAME, type PopupInbound, type PopupOutbound } from "@/lib/popup-bridge";
 import { attachSessionsLiveFlag } from "@/lib/sessions-live-flag";
@@ -35,6 +38,8 @@ export default defineBackground(() => {
   const transport = new WSTransport({ url: __TABSTRIDE_DAEMON_WS_URL__ });
   const sessions = new SessionManager();
   const cdp = new ChromiumCdp();
+  const operationLogs = new OperationLogStore();
+  const popupPorts = new Set<chrome.runtime.Port>();
   const sessionsLive = attachSessionsLiveFlag({ manager: sessions });
   // Re-sync the storage.session flag on SW startup so a previous SW's
   // stale `true` does not keep waking us on every page load until the
@@ -65,6 +70,15 @@ export default defineBackground(() => {
       title: i18n.t("helpRequest.notificationTitle", { ns: "extension" }),
       body: "",
     }),
+    onOperationLog: (entry) => {
+      operationLogs.upsert(entry);
+      postOperationLogsToPopups(popupPorts, operationLogs.listRecent());
+      if (entry.method === "tool.session_stop" && entry.status !== "running") {
+        operationLogs.clear(entry.sessionId);
+        return;
+      }
+      void broadcastOperationLogs(sessions, operationLogs, entry);
+    },
   });
   dispatcher.start();
   if (typeof chrome.notifications?.onClicked?.addListener === "function") {
@@ -129,7 +143,10 @@ export default defineBackground(() => {
       const ctx =
         (typeof tabId === "number" ? sessions.findByTabId(tabId) : null) ??
         (typeof windowId === "number" ? sessions.findByWindowId(windowId) : null);
-      sendResponse({ sessionId: ctx?.sessionId ?? null });
+      sendResponse({
+        sessionId: ctx?.sessionId ?? null,
+        operationLogs: ctx ? operationLogs.list(ctx.sessionId) : [],
+      });
       return false;
     }
 
@@ -145,6 +162,7 @@ export default defineBackground(() => {
 
   chrome.runtime.onConnect.addListener((connection) => {
     if (connection.name !== POPUP_PORT_NAME) return;
+    popupPorts.add(connection);
     const post = (msg: PopupInbound) => {
       try {
         connection.postMessage(msg);
@@ -155,6 +173,7 @@ export default defineBackground(() => {
     const unsubscribe = controller.subscribe((snap) => {
       post({ kind: "snapshot", data: snap });
     });
+    post({ kind: "operation_logs", data: operationLogs.listRecent() });
     connection.onMessage.addListener((raw: unknown) => {
       const msg = raw as PopupOutbound;
       if (msg && typeof msg === "object" && "kind" in msg) {
@@ -170,7 +189,10 @@ export default defineBackground(() => {
         }
       }
     });
-    connection.onDisconnect.addListener(() => unsubscribe());
+    connection.onDisconnect.addListener(() => {
+      popupPorts.delete(connection);
+      unsubscribe();
+    });
   });
 
   // Stash on globalThis so the SW DevTools can poke at internals.
@@ -189,6 +211,53 @@ export default defineBackground(() => {
 
   console.info("[tabstride] background worker initialised");
 });
+
+function postOperationLogsToPopups(
+  ports: Set<chrome.runtime.Port>,
+  logs: OverlayOperationLogEntry[],
+): void {
+  for (const port of ports) {
+    try {
+      port.postMessage({ kind: "operation_logs", data: logs } satisfies PopupInbound);
+    } catch (err) {
+      console.debug("[tabstride operation log] popup post failed", err);
+    }
+  }
+}
+
+async function broadcastOperationLogs(
+  sessions: SessionManager,
+  store: OperationLogStore,
+  entry: OverlayOperationLogEntry,
+): Promise<void> {
+  const ctx = sessions.get(entry.sessionId);
+  if (!ctx) return;
+  const tabIds = new Set<number>(ctx.borrowedTabs.keys());
+  if (ctx.mode === "attach" && ctx.attachedTabId !== undefined) {
+    tabIds.add(ctx.attachedTabId);
+  } else {
+    try {
+      const tabs = await chrome.tabs.query({ windowId: ctx.agentWindowId });
+      for (const tab of tabs) {
+        if (typeof tab.id === "number") tabIds.add(tab.id);
+      }
+    } catch (err) {
+      console.debug("[tabstride operation log] failed to list Agent Window tabs", err);
+    }
+  }
+  const message = {
+    type: OVERLAY_OPERATION_LOGS,
+    sessionId: entry.sessionId,
+    logs: store.list(entry.sessionId),
+  };
+  await Promise.allSettled(
+    Array.from(tabIds, (tabId) =>
+      chrome.tabs.sendMessage(tabId, message).catch(() => {
+        // Restricted or navigating tabs restore logs through overlay.who_am_i.
+      }),
+    ),
+  );
+}
 
 /**
  * Push a `session.user_interrupt` event to the daemon for `sessionId`.

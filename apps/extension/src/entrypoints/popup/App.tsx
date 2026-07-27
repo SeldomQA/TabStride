@@ -4,6 +4,7 @@ import { Badge, Button, cn } from "@tabstride/ui";
 import { useEffect, useState } from "react";
 import { PROTOCOL_VERSION } from "@/transport/handshake";
 import { ConnectionStatusIndicator } from "./connection-status-indicator";
+import { OperationLogPanel } from "./OperationLogPanel";
 import { type PopupStatusState, useConnectionState } from "./use-connection-state";
 
 const STATE_LABEL_KEYS = {
@@ -29,7 +30,7 @@ function getLogoSrc() {
 
 export function App() {
   const { t } = useTranslation("extension");
-  const { snapshot, statusState, setConnectionEnabled } = useConnectionState();
+  const { snapshot, operationLogs, statusState, setConnectionEnabled } = useConnectionState();
   const [copiedInstanceId, setCopiedInstanceId] = useState(false);
 
   useEffect(() => {
@@ -132,6 +133,8 @@ export function App() {
           {snapshot.lastError}
         </div>
       )}
+
+      <OperationLogPanel logs={operationLogs} />
 
       <section
         className="flex min-w-0 items-center justify-between gap-2 border-t border-border/70 pt-2 text-[10px] leading-tight text-muted-foreground"

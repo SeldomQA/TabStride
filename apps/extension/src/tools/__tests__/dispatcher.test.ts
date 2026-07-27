@@ -67,6 +67,62 @@ describe("ToolDispatcher", () => {
     });
   });
 
+  it("publishes running and completed operation log states", async () => {
+    const { transport, deliver } = fakeTransport();
+    const sessions = new SessionManager({
+      agentWindow: {
+        create: vi.fn(async () => 4242),
+        remove: vi.fn(),
+        ensureActiveTab: vi.fn(async () => {}),
+      },
+    });
+    const onOperationLog = vi.fn();
+    const dispatcher = new ToolDispatcher({ transport, sessions, onOperationLog });
+    dispatcher.start();
+
+    deliver(makeRequest("tool.session_start", { session_id: "aa11" }));
+    await flushMicrotasks();
+
+    expect(onOperationLog).toHaveBeenCalledTimes(2);
+    expect(onOperationLog.mock.calls[0]?.[0]).toMatchObject({
+      id: "r-1",
+      sessionId: "aa11",
+      method: "tool.session_start",
+      status: "running",
+    });
+    expect(onOperationLog.mock.calls[1]?.[0]).toMatchObject({
+      id: "r-1",
+      sessionId: "aa11",
+      method: "tool.session_start",
+      status: "succeeded",
+    });
+  });
+
+  it("publishes failed operation log state with the error code", async () => {
+    const { transport, deliver } = fakeTransport();
+    const sessions = new SessionManager({
+      agentWindow: {
+        create: vi.fn(async () => 4242),
+        remove: vi.fn(),
+        ensureActiveTab: vi.fn(async () => {}),
+      },
+    });
+    const onOperationLog = vi.fn();
+    const dispatcher = new ToolDispatcher({ transport, sessions, onOperationLog });
+    dispatcher.start();
+
+    deliver(makeRequest("tool.future_action", { session_id: "aa11" }));
+    await flushMicrotasks();
+
+    expect(onOperationLog.mock.calls[1]?.[0]).toMatchObject({
+      id: "r-1",
+      sessionId: "aa11",
+      method: "tool.future_action",
+      status: "failed",
+      errorCode: "unknown_method",
+    });
+  });
+
   it("routes tool.session_stop and replies with empty result", async () => {
     const { transport, sent, deliver } = fakeTransport();
     const sessions = new SessionManager({

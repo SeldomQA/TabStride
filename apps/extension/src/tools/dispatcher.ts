@@ -1,3 +1,5 @@
+import { operationSessionId, summarizeOperation } from "@/lib/operation-log";
+import type { OverlayOperationLogEntry } from "@/lib/overlay-bridge";
 import { OVERLAY_AUTOMATION_BYPASS } from "@/lib/overlay-bridge";
 import type { SessionManager } from "@/session-manager/manager";
 import type { Transport } from "@/transport/transport";
@@ -81,6 +83,8 @@ export interface DispatcherDeps {
   approveBorrow?: BorrowConfirmationApprover;
   /** i18n notification copy for `tool.request_help` (resolved per-call). */
   helpNotificationCopy?: () => { title: string; body: string };
+  /** Publishes privacy-safe AI operation state to the in-page log panel. */
+  onOperationLog?: (entry: OverlayOperationLogEntry) => void;
 }
 
 /**
@@ -109,6 +113,7 @@ export class ToolDispatcher {
   private readonly onSessionsChanged?: () => void;
   private readonly approveBorrow?: BorrowConfirmationApprover;
   private readonly helpNotificationCopy?: () => { title: string; body: string };
+  private readonly onOperationLog?: (entry: OverlayOperationLogEntry) => void;
   private subscription: { dispose(): void } | null = null;
   /**
    * Per-rpc-id `AbortController` registry. Populated inside
@@ -125,6 +130,7 @@ export class ToolDispatcher {
     this.onSessionsChanged = deps.onSessionsChanged;
     this.approveBorrow = deps.approveBorrow;
     this.helpNotificationCopy = deps.helpNotificationCopy;
+    this.onOperationLog = deps.onOperationLog;
   }
 
   start(): void {
@@ -181,6 +187,19 @@ export class ToolDispatcher {
 
     const mutatesSessions =
       req.method === "tool.session_start" || req.method === "tool.session_stop";
+    const operationStartedAtMs = Date.now();
+    const operationSession = operationSessionId(req.params);
+    const operationDetail = summarizeOperation(req.method, req.params);
+    if (operationSession && req.method.startsWith("tool.")) {
+      this.emitOperationLog({
+        id: req.id,
+        sessionId: operationSession,
+        method: req.method,
+        status: "running",
+        ...(operationDetail ? { detail: operationDetail } : {}),
+        startedAtMs: operationStartedAtMs,
+      });
+    }
     const ac = new AbortController();
     this.inflightAbortControllers.set(req.id, ac);
     let body: ResponseFrame;
@@ -212,6 +231,19 @@ export class ToolDispatcher {
       }
     } finally {
       this.inflightAbortControllers.delete(req.id);
+    }
+    if (operationSession && req.method.startsWith("tool.")) {
+      const error = "error" in body ? body.error : undefined;
+      this.emitOperationLog({
+        id: req.id,
+        sessionId: operationSession,
+        method: req.method,
+        status: error ? "failed" : "succeeded",
+        ...(operationDetail ? { detail: operationDetail } : {}),
+        ...(error ? { errorCode: error.code } : {}),
+        startedAtMs: operationStartedAtMs,
+        durationMs: Math.max(0, Date.now() - operationStartedAtMs),
+      });
     }
     let sent = true;
     try {
@@ -249,6 +281,14 @@ export class ToolDispatcher {
       }
     }
     if (mutatesSessions) this.onSessionsChanged?.();
+  }
+
+  private emitOperationLog(entry: OverlayOperationLogEntry): void {
+    try {
+      this.onOperationLog?.(entry);
+    } catch (err) {
+      console.debug("[tabstride dispatcher] operation log observer failed", err);
+    }
   }
 
   private async invoke(req: RequestFrame, signal: AbortSignal): Promise<unknown | RpcError> {

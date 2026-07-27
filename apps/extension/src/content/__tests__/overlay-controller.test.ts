@@ -22,6 +22,15 @@ describe("OverlayController", () => {
       onCancel: vi.fn(),
     });
     controller.setAutomationBypass(true);
+    controller.setOperationLogs("sess-1", [
+      {
+        id: "rpc-1",
+        sessionId: "sess-1",
+        method: "tool.click",
+        status: "succeeded",
+        startedAtMs: 1,
+      },
+    ]);
 
     controller.resetAgentOverlays("sess-1");
 
@@ -32,6 +41,23 @@ describe("OverlayController", () => {
     expect(state.activeSessionId).toBeNull();
     expect(state.activeHelp).toBeNull();
     expect(state.automationBypassCount).toBe(0);
+    expect(state.operationLogs).toEqual([]);
+  });
+
+  it("accepts operation logs only for the active session", () => {
+    const controller = new OverlayController();
+    controller.activateAgentSession("sess-1");
+    const log = {
+      id: "rpc-1",
+      sessionId: "sess-1",
+      method: "tool.snapshot",
+      status: "running" as const,
+      startedAtMs: 1,
+    };
+    controller.setOperationLogs("sess-2", [log]);
+    expect(controller.snapshot().operationLogs).toEqual([]);
+    controller.setOperationLogs("sess-1", [log]);
+    expect(controller.snapshot().operationLogs).toEqual([log]);
   });
 
   it("ignores a reset for a different session", () => {

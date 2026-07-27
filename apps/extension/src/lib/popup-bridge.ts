@@ -1,4 +1,5 @@
 import type { SnapshotInfo } from "./connection-controller";
+import type { OverlayOperationLogEntry } from "./overlay-bridge";
 
 /**
  * Wire protocol for `chrome.runtime.connect({ name: "popup" })`:
@@ -19,4 +20,6 @@ export type PopupOutbound =
   | { kind: "set_port"; value: number }
   | { kind: "set_connection_enabled"; value: boolean };
 
-export type PopupInbound = { kind: "snapshot"; data: SnapshotInfo };
+export type PopupInbound =
+  | { kind: "snapshot"; data: SnapshotInfo }
+  | { kind: "operation_logs"; data: OverlayOperationLogEntry[] };
