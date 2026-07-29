@@ -773,6 +773,39 @@ mod session_user_interrupt_tests {
     }
 
     #[test]
+    fn user_interrupt_then_window_closed_preserves_user_aborted_for_inflight_request() {
+        let state = test_only_daemon_state();
+        let owner = BrowserId("owner-browser".into());
+        let sid = state
+            .sessions
+            .reserve_id(
+                owner.clone(),
+                tabstride_protocol::tools::SessionMode::Attach,
+                8,
+                || 0,
+            )
+            .expect("reserved session id");
+        let guard = state
+            .tool_inflight
+            .register("rpc-1".into(), sid.clone())
+            .unwrap();
+        let payload = serde_json::json!({"session_id": sid.0.clone()});
+
+        handle_session_user_interrupt(&state, &owner, &payload);
+        handle_session_window_closed(&state, &owner, &payload);
+
+        assert_eq!(
+            guard.entry().cancel_reason(),
+            Some(CancelReason::UserAborted),
+            "the in-flight CLI command must report an explicit user cancellation"
+        );
+        assert!(
+            state.sessions.get(&sid).is_none(),
+            "the cancelled attach session must also be released"
+        );
+    }
+
+    #[test]
     fn handle_session_window_closed_ignored_from_non_owning_browser() {
         let state = test_only_daemon_state();
         let owner = BrowserId("owner-browser".into());

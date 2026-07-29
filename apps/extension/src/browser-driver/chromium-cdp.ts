@@ -82,6 +82,12 @@ export const CDP_PROTOCOL_VERSION = "1.3";
 /** Per-tab monotonic sequence returned by [`ChromiumCdp.dialogCursor`]. */
 export type DialogCursor = number;
 
+export interface CdpUnexpectedDetachEvent {
+  tabId: number;
+  reason: string;
+  sessionIds: string[];
+}
+
 const MAX_DIALOG_BUFFER = 32;
 const MAX_DIALOG_FIELD_LENGTH = 4096;
 const MAX_CONSOLE_BUFFER = 200;
@@ -107,6 +113,8 @@ export class ChromiumCdp {
   private readonly attachedTabs = new Set<number>();
   private readonly attachInFlight = new Map<number, Promise<void>>();
   private readonly tabOwners = new Map<number, Set<string>>();
+  private readonly expectedDetaches = new Set<number>();
+  private readonly unexpectedDetachHandlers = new Set<(event: CdpUnexpectedDetachEvent) => void>();
   private readonly dialogBuffers = new Map<number, JavaScriptDialogInfo[]>();
   private readonly dialogSequences = new Map<number, number>();
   private readonly consoleBuffers = new Map<number, ConsoleEntry[]>();
@@ -132,6 +140,10 @@ export class ChromiumCdp {
       return;
     }
     const attach = (async () => {
+      // A successful programmatic detach may not deliver onDetach before
+      // its promise resolves. A new attach starts a fresh lifecycle, so
+      // any old expected-detach marker must no longer suppress user cancel.
+      this.expectedDetaches.delete(tabId);
       await this.api.attach({ tabId }, CDP_PROTOCOL_VERSION);
       await this.enablePageDomain(tabId);
       await this.enableConsoleDomains(tabId);
@@ -223,9 +235,11 @@ export class ChromiumCdp {
     this.attachedTabs.delete(tabId);
     this.clearDialogState(tabId);
     this.clearConsoleState(tabId);
+    this.expectedDetaches.add(tabId);
     try {
       await this.api.detach({ tabId });
     } catch (err) {
+      this.expectedDetaches.delete(tabId);
       // Tab may already be gone — Chrome auto-detaches on close. Log
       // at debug so production builds aren't noisy.
       console.debug("[tabstride cdp] detach failed (likely tab already closed)", err);
@@ -254,6 +268,20 @@ export class ChromiumCdp {
     };
   }
 
+  /**
+   * Subscribe to unilateral debugger detach events. In particular Chrome
+   * reports `canceled_by_user` when the user clicks Cancel on its debugging
+   * infobar. Programmatic TabStride detaches are excluded.
+   */
+  onUnexpectedDetach(handler: (event: CdpUnexpectedDetachEvent) => void): {
+    dispose(): void;
+  } {
+    this.unexpectedDetachHandlers.add(handler);
+    return {
+      dispose: () => this.unexpectedDetachHandlers.delete(handler),
+    };
+  }
+
   /** Best-effort detach of every cached tab. Used on session.stop. */
   async detachAll(): Promise<void> {
     const tabs = Array.from(this.attachedTabs);
@@ -267,9 +295,11 @@ export class ChromiumCdp {
     this.consoleDomainsAttemptedTabs.clear();
     await Promise.all(
       tabs.map(async (tabId) => {
+        this.expectedDetaches.add(tabId);
         try {
           await this.api.detach({ tabId });
         } catch (err) {
+          this.expectedDetaches.delete(tabId);
           console.debug("[tabstride cdp] detachAll: tab already gone", { tabId, err });
         }
       }),
@@ -388,13 +418,24 @@ export class ChromiumCdp {
 
   private bindAutoDetach(): void {
     if (this.detachSubscription) return;
-    const listener = (source: chrome.debugger.Debuggee, _reason: string) => {
-      if (typeof source.tabId === "number") {
-        this.attachedTabs.delete(source.tabId);
-        this.attachInFlight.delete(source.tabId);
-        this.tabOwners.delete(source.tabId);
-        this.clearDialogState(source.tabId);
-        this.clearConsoleState(source.tabId);
+    const listener = (source: chrome.debugger.Debuggee, reason: string) => {
+      const tabId = source.tabId;
+      if (typeof tabId !== "number") return;
+      const expected = this.expectedDetaches.delete(tabId);
+      const sessionIds = Array.from(this.tabOwners.get(tabId) ?? []);
+      this.attachedTabs.delete(tabId);
+      this.attachInFlight.delete(tabId);
+      this.tabOwners.delete(tabId);
+      this.clearDialogState(tabId);
+      this.clearConsoleState(tabId);
+      if (expected) return;
+      const event = { tabId, reason, sessionIds };
+      for (const handler of this.unexpectedDetachHandlers) {
+        try {
+          handler(event);
+        } catch (err) {
+          console.warn("[tabstride cdp] unexpected detach handler failed", err);
+        }
       }
     };
     this.api.onDetach.addListener(listener);
@@ -411,6 +452,7 @@ export class ChromiumCdp {
     this.dialogSubscription = null;
     this.consoleSubscription?.dispose();
     this.consoleSubscription = null;
+    this.unexpectedDetachHandlers.clear();
   }
 
   /** Detach tabs only when no other live session has claimed them. */

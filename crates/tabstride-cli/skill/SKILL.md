@@ -118,6 +118,7 @@ Do **not** call `tabstride get-html` or `tabstride screenshot` first just to ins
 | Return borrowed tabs | Call `tabstride tab return <tab-id> --session <id>` when finished; unreturned tabs are **auto-returned** on `tabstride session stop` |
 | Tab management in attach mode | `tab create`, `tab close`, `tab borrow`, and `tab return` are unavailable; do not work around this boundary |
 | Stop behavior | Isolated stop closes the Agent Window; attach stop releases control and its overlay but keeps the user's tab/window open |
+| Chrome debugger Cancel | Treat `user_aborted` as explicit user revocation: stop the task immediately, do not retry, and do not create a replacement attach session until the user makes a new request |
 
 ## Global flags
 

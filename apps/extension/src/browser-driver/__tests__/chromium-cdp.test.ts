@@ -90,6 +90,39 @@ describe("ChromiumCdp", () => {
     expect(cdp.isAttached(11)).toBe(false);
   });
 
+  it("reports a user-cancelled debugger detach with its session owners", async () => {
+    const { api, onDetach } = fakeApi();
+    const cdp = new ChromiumCdp(api);
+    const handler = vi.fn();
+    cdp.onUnexpectedDetach(handler);
+    await cdp.ensureAttached(11);
+    cdp.trackSessionTab("aa11", 11);
+
+    onDetach.fire({ tabId: 11 }, "canceled_by_user");
+
+    expect(handler).toHaveBeenCalledWith({
+      tabId: 11,
+      reason: "canceled_by_user",
+      sessionIds: ["aa11"],
+    });
+  });
+
+  it("does not report TabStride's own detach as an unexpected user cancellation", async () => {
+    const { api, onDetach } = fakeApi();
+    const cdp = new ChromiumCdp(api);
+    const handler = vi.fn();
+    cdp.onUnexpectedDetach(handler);
+    await cdp.ensureAttached(7);
+    cdp.trackSessionTab("aa11", 7);
+    (api.detach as ReturnType<typeof vi.fn>).mockImplementationOnce(async ({ tabId }) => {
+      onDetach.fire({ tabId }, "canceled_by_user");
+    });
+
+    await cdp.detach(7);
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it("detach() is idempotent and never throws", async () => {
     const { api } = fakeApi();
     const cdp = new ChromiumCdp(api);

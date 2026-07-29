@@ -29,6 +29,7 @@ import {
   requestBorrowConfirmation,
 } from "@/tools/borrow-confirmation";
 import { ToolDispatcher } from "@/tools/dispatcher";
+import { chromeAgentOverlayResetApi } from "@/tools/tabs";
 import { detectBrowserMeta } from "@/transport/handshake";
 import type { Transport } from "@/transport/transport";
 import { WSTransport } from "@/transport/ws-transport";
@@ -110,6 +111,8 @@ export default defineBackground(() => {
     manager: sessions,
     transport,
     cdp,
+    resetAgentOverlays: (tabId, sessionId) =>
+      chromeAgentOverlayResetApi.resetAgentOverlays(tabId, sessionId),
     onSessionsChanged: () => {
       void sessionsLive.syncFromManager();
     },
