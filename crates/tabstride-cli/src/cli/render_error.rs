@@ -44,6 +44,12 @@ pub mod reason {
     pub const SELECTOR_NOT_FOUND: &str = "selector_not_found";
     pub const LOCATOR_NOT_FOUND: &str = "locator_not_found";
     pub const AMBIGUOUS_TARGET: &str = "ambiguous_target";
+    pub const ELEMENT_DETACHED: &str = "element_detached";
+    pub const ELEMENT_NOT_STABLE: &str = "element_not_stable";
+    pub const ELEMENT_DISABLED: &str = "element_disabled";
+    pub const ELEMENT_NOT_EDITABLE: &str = "element_not_editable";
+    pub const ELEMENT_OBSCURED: &str = "element_obscured";
+    pub const ELEMENT_NOT_FOCUSABLE: &str = "element_not_focusable";
     pub const TARGET_NOT_FILLABLE: &str = "target_not_fillable";
     pub const TARGET_NOT_SELECT: &str = "target_not_select";
     pub const OPTION_NOT_FOUND: &str = "option_not_found";
@@ -251,6 +257,20 @@ pub fn info_for_error(code: ErrorCode, data: Option<&serde_json::Value>) -> Rend
             ),
             exit_code: base.exit_code,
         },
+        (ErrorCode::InvalidParams, reason::ELEMENT_NOT_EDITABLE) => RenderInfo {
+            summary: "target element is not editable",
+            hint: Some(
+                "choose an enabled input, textarea, or contenteditable element from the latest snapshot",
+            ),
+            exit_code: base.exit_code,
+        },
+        (ErrorCode::InvalidParams, reason::ELEMENT_NOT_FOCUSABLE) => RenderInfo {
+            summary: "target element cannot receive keyboard input",
+            hint: Some(
+                "choose a visible, enabled, focusable control or omit the press target to use the current focus",
+            ),
+            exit_code: base.exit_code,
+        },
         (ErrorCode::InvalidParams, reason::TARGET_NOT_SELECT) => RenderInfo {
             summary: "target element is not a <select>",
             hint: Some(
@@ -283,6 +303,20 @@ pub fn info_for_error(code: ErrorCode, data: Option<&serde_json::Value>) -> Rend
             summary: "previous session command is still running",
             hint: Some(
                 "wait for the current command to finish, cancel it with Ctrl-C, or stop/restart the session",
+            ),
+            exit_code: base.exit_code,
+        },
+        (
+            ErrorCode::Timeout,
+            reason::ELEMENT_DETACHED
+            | reason::ELEMENT_NOT_VISIBLE
+            | reason::ELEMENT_NOT_STABLE
+            | reason::ELEMENT_DISABLED
+            | reason::ELEMENT_OBSCURED,
+        ) => RenderInfo {
+            summary: "target did not become actionable before timeout",
+            hint: Some(
+                "inspect error.data.failed_check and error.data.last_state; verify the element is visible, stable, enabled, and unobscured",
             ),
             exit_code: base.exit_code,
         },
@@ -394,6 +428,22 @@ mod tests {
             info.hint.unwrap().contains("wait for the current command"),
             "expected session-busy-specific hint"
         );
+        assert_eq!(info.exit_code, 4);
+    }
+
+    #[test]
+    fn actionability_timeout_has_state_specific_copy() {
+        let data = serde_json::json!({
+            "reason": reason::ELEMENT_OBSCURED,
+            "failed_check": "receives_events",
+            "last_state": { "not_obscured": false }
+        });
+        let info = info_for_error(ErrorCode::Timeout, Some(&data));
+        assert_eq!(
+            info.summary,
+            "target did not become actionable before timeout"
+        );
+        assert!(info.hint.unwrap().contains("failed_check"));
         assert_eq!(info.exit_code, 4);
     }
 

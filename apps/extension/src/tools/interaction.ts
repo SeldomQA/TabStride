@@ -24,6 +24,7 @@ import type {
   SelectParams,
   SelectResult,
 } from "@/transport/types";
+import { waitForActionable } from "./actionability";
 import { attachDialogs, markDialogCursor } from "./dialogs";
 import {
   backendNodeToObject,
@@ -33,7 +34,6 @@ import {
   scrollNodeIntoView,
 } from "./element-geometry";
 import { rpcError } from "./errors";
-import { resolveLocator } from "./locator";
 import {
   type CdpRunner,
   type ChromeTabsApi,
@@ -108,6 +108,10 @@ export async function handleClick(
   params: ClickParams,
   deps: InteractionDeps = getDefaultDeps(),
 ): Promise<ClickResult | RpcError> {
+  const clickCount = params?.click_count ?? 1;
+  if (clickCount < 1) {
+    return { code: "invalid_params", message: "click_count must be greater than zero" };
+  }
   const ctxOrErr = lookupSession(manager, params, "click");
   if (isRpcError(ctxOrErr)) return ctxOrErr;
   const ctx = ctxOrErr;
@@ -119,7 +123,10 @@ export async function handleClick(
   if (denied) return denied;
   const dialogCursor = markDialogCursor(deps.cdp, target.tabId);
 
-  const node = await resolveLocator(deps.cdp, ctx, target.tabId, params.target);
+  const node = await waitForActionable(deps.cdp, ctx, target.tabId, params.target, "click", {
+    timeoutMs: params.timeout_ms ?? deps.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
+    signal: deps.signal,
+  });
   if (isRpcError(node)) return node;
 
   if (throwIfAborted(deps.signal)) {
@@ -145,10 +152,6 @@ export async function handleClick(
   }
 
   const button: MouseButton = params.button ?? "left";
-  const clickCount = params.click_count ?? 1;
-  if (clickCount < 1) {
-    return { code: "invalid_params", message: "click_count must be greater than zero" };
-  }
   const modifiers = modifiersBitfield(params.modifiers);
 
   const overlayBlocking = await checkOverlayAtPoint(deps.cdp, target.tabId, centre.x, centre.y);
@@ -385,7 +388,10 @@ export async function handleFill(
   if (denied) return denied;
   const dialogCursor = markDialogCursor(deps.cdp, target.tabId);
 
-  const node = await resolveLocator(deps.cdp, ctx, target.tabId, params.target);
+  const node = await waitForActionable(deps.cdp, ctx, target.tabId, params.target, "fill", {
+    timeoutMs: params.timeout_ms ?? deps.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
+    signal: deps.signal,
+  });
   if (isRpcError(node)) return node;
 
   try {
@@ -655,7 +661,10 @@ export async function handlePress(
   let usedTarget: PressResult["used_target"];
   // Optional focus before key dispatch.
   if (params.target) {
-    const node = await resolveLocator(deps.cdp, ctx, target.tabId, params.target);
+    const node = await waitForActionable(deps.cdp, ctx, target.tabId, params.target, "press", {
+      timeoutMs: params.timeout_ms ?? deps.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
+      signal: deps.signal,
+    });
     if (isRpcError(node)) return node;
     usedTarget = node.usedTarget;
     try {
@@ -769,7 +778,10 @@ export async function handleSelect(
   if (denied) return denied;
   const dialogCursor = markDialogCursor(deps.cdp, target.tabId);
 
-  const node = await resolveLocator(deps.cdp, ctx, target.tabId, params.target);
+  const node = await waitForActionable(deps.cdp, ctx, target.tabId, params.target, "select", {
+    timeoutMs: params.timeout_ms ?? deps.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
+    signal: deps.signal,
+  });
   if (isRpcError(node)) return node;
 
   try {

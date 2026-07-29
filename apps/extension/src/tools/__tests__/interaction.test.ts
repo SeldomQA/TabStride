@@ -28,7 +28,32 @@ function makeFakeCdp(handlers: Record<string, (params: unknown) => unknown>) {
   const sent: Array<{ tabId: number; method: string; params?: object }> = [];
   const sendImpl = async (tabId: number, method: string, params?: object) => {
     sent.push({ tabId, method, params });
+    if (
+      method === "Runtime.callFunctionOn" &&
+      String((params as { functionDeclaration?: string })?.functionDeclaration ?? "").includes(
+        "__tabstrideActionabilityV1",
+      )
+    ) {
+      return {
+        result: {
+          value: {
+            attached: true,
+            visible: true,
+            enabled: true,
+            editable: true,
+            receives_events: true,
+            not_obscured: true,
+            focusable: true,
+            select: true,
+            rect: { x: 10, y: 20, width: 100, height: 40 },
+          },
+        },
+      };
+    }
     const h = handlers[method];
+    if (!h && method === "DOM.resolveNode") {
+      return { object: { objectId: "actionability-node" } };
+    }
     if (!h) throw new Error(`unexpected CDP call ${method}`);
     return h(params);
   };
@@ -48,6 +73,22 @@ function makeFakeCdp(handlers: Record<string, (params: unknown) => unknown>) {
     query: vi.fn(async () => [{ id: 4, windowId: 100, active: true } as chrome.tabs.Tab]),
   };
   return { cdp, tabsApi, sent };
+}
+
+function isActionabilityCall(call: { method: string; params?: object }): boolean {
+  return (
+    call.method === "Runtime.callFunctionOn" &&
+    String((call.params as { functionDeclaration?: string })?.functionDeclaration ?? "").includes(
+      "__tabstrideActionabilityV1",
+    )
+  );
+}
+
+function isSelectMutationCall(call: { method: string; params?: object }): boolean {
+  return (
+    call.method === "Runtime.callFunctionOn" &&
+    Array.isArray((call.params as { arguments?: unknown[] })?.arguments)
+  );
 }
 
 describe("modifiersBitfield", () => {
@@ -392,7 +433,9 @@ describe("handleClick", () => {
     );
 
     if ("code" in res) throw new Error(`unexpected error: ${JSON.stringify(res)}`);
-    const fallback = fake.sent.find((c) => c.method === "Runtime.callFunctionOn");
+    const fallback = fake.sent.find(
+      (c) => c.method === "Runtime.callFunctionOn" && !isActionabilityCall(c),
+    );
     expect(fallback?.params).toMatchObject({ objectId: "obj-1" });
   });
 
@@ -513,7 +556,9 @@ describe("handleFill", () => {
     expect(insert?.params).toEqual({ text: "hello" });
     // clear_before defaults to true → callFunctionOn invoked once to
     // clear, once to fire input/change after typing.
-    const callFns = fake.sent.filter((c) => c.method === "Runtime.callFunctionOn");
+    const callFns = fake.sent.filter(
+      (c) => c.method === "Runtime.callFunctionOn" && !isActionabilityCall(c),
+    );
     expect(callFns.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -901,7 +946,9 @@ describe("handleSelect", () => {
     expect(res.multiple).toBe(true);
     expect(res.selected_values).toEqual(["us", "ca"]);
     expect(res.selected_labels).toEqual(["United States", "Canada"]);
-    const callFn = fake.sent.find((c) => c.method === "Runtime.callFunctionOn");
+    const callFn = fake.sent.find(
+      (c) => c.method === "Runtime.callFunctionOn" && !isActionabilityCall(c),
+    );
     expect(callFn?.params).toMatchObject({
       arguments: [{ value: ["us", "ca"] }],
     });
@@ -969,7 +1016,9 @@ describe("handleSelect", () => {
       code: "invalid_params",
       data: { reason: "single_select_value_count" },
     });
-    expect(fake.sent.some((c) => c.method === "Runtime.callFunctionOn")).toBe(false);
+    expect(
+      fake.sent.some(isSelectMutationCall),
+    ).toBe(false);
   });
 
   it("stops before mutation when abort fires after focus", async () => {
@@ -995,6 +1044,8 @@ describe("handleSelect", () => {
       { cdp: fake.cdp, tabsApi: fake.tabsApi, signal: abort.signal },
     );
     expect(res).toMatchObject({ code: "cancelled" });
-    expect(fake.sent.some((c) => c.method === "Runtime.callFunctionOn")).toBe(false);
+    expect(
+      fake.sent.some(isSelectMutationCall),
+    ).toBe(false);
   });
 });

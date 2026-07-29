@@ -43,6 +43,11 @@ Flow: exactly one of `ref`, `css`, `role` + `name`, `label`, `placeholder`, `tex
 with optional `exact` for semantic matching. Zero matches return `not_found`; multiple matches
 return `ambiguous_target`.
 
+All four interactions use the extension's shared Actionability Engine before dispatch. Click waits
+for visible/stable/enabled/unobscured state, fill requires editable, select requires an enabled
+native `<select>`, and targeted press requires focusable. Actionability failures expose
+`reason`, `failed_check`, `elapsed_ms`, and `last_state` in JSON errors.
+
 Examples:
 
 ```bash
