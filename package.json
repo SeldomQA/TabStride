@@ -8,6 +8,9 @@
     "ext:build:zip": "pnpm --filter @tabstride/extension zip",
     "ext:dev": "pnpm --filter @tabstride/extension dev",
     "ext:test": "pnpm --filter @tabstride/extension test",
+    "e2e:chrome": "node scripts/actionability-chrome-e2e.mjs --prepare --mode e2e",
+    "perf:chrome": "node scripts/actionability-chrome-e2e.mjs --prepare --mode benchmark --report artifacts/actionability-performance.json",
+    "test:chrome": "node scripts/actionability-chrome-e2e.mjs --prepare --mode all --report artifacts/actionability-performance.json",
     "lint": "biome check . && stylelint \"**/*.css\"",
     "format": "biome format --write ."
   },
