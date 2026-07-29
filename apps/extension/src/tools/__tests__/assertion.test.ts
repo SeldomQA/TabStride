@@ -194,6 +194,11 @@ describe("Web-first Assertions v1", () => {
         expected: "ready",
         actual: "done",
         match_count: 1,
+        timing: {
+          locator_ms: expect.any(Number),
+          wait_ms: expect.any(Number),
+          cdp_ms: expect.any(Number),
+        },
       },
     });
   });

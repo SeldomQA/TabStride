@@ -3,6 +3,7 @@
 pub mod assertion;
 pub mod console;
 pub mod dialog;
+pub mod evidence;
 pub mod human_loop;
 pub mod interaction;
 pub mod navigation;
@@ -15,6 +16,7 @@ pub mod waits;
 pub use assertion::*;
 pub use console::*;
 pub use dialog::*;
+pub use evidence::*;
 pub use human_loop::*;
 pub use interaction::*;
 pub use navigation::*;

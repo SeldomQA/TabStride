@@ -80,6 +80,7 @@ fn main() {
     dump!(AssertionSpec, "assertion_spec");
     dump!(AssertParams, "tool_assert_params");
     dump!(AssertResult, "tool_assert_result");
+    dump!(FailureEvidence, "failure_evidence");
     dump!(Locator, "locator");
 
     dump!(SnapshotParams, "tool_snapshot_params");

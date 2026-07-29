@@ -5,7 +5,7 @@
 
 import { ChromiumCdp } from "@/browser-driver/chromium-cdp";
 import { TABSTRIDE_OVERLAY_HOST_SELECTOR } from "@/lib/overlay-dom";
-import type { SessionManager } from "@/session-manager/manager";
+import type { SessionContext, SessionManager } from "@/session-manager/manager";
 import type {
   GetHtmlParams,
   GetHtmlResult,
@@ -143,6 +143,37 @@ async function captureElementScreenshot(
     return {
       code: "cdp_failed",
       message: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/** Capture the current viewport through CDP for failure diagnostics. */
+export async function captureFailureScreenshot(
+  cdp: SharedCdpRunner,
+  tabId: number,
+): Promise<ScreenshotResult | RpcError> {
+  try {
+    const shot = await cdp.send<{ data?: string }>(tabId, "Page.captureScreenshot", {
+      format: "png",
+      fromSurface: true,
+      captureBeyondViewport: false,
+    });
+    const image_base64 = shot.data ?? "";
+    if (!image_base64) {
+      return { code: "cdp_failed", message: "Page.captureScreenshot returned no data" };
+    }
+    const dimensions = parsePngDimensions(image_base64) ?? { width: 0, height: 0 };
+    return {
+      image_base64,
+      width: dimensions.width,
+      height: dimensions.height,
+      format: "png",
+      tab_id: tabId,
+    };
+  } catch (error) {
+    return {
+      code: "cdp_failed",
+      message: error instanceof Error ? error.message : String(error),
     };
   }
 }
@@ -602,32 +633,40 @@ export async function handleSnapshot(
   if (isRpcError(target)) return target;
   const dialogCursor = markDialogCursor(deps.cdp, target.tabId);
 
+  const result = await captureFailureSnapshot(deps.cdp, ctx, target.tabId, params);
+  if (isRpcError(result)) return result;
+  return attachDialogs(deps.cdp, target.tabId, dialogCursor, result);
+}
+
+/**
+ * Low-level AX snapshot capture shared by `tool.snapshot` and failure
+ * evidence. The fresh snapshot intentionally replaces the session ref store.
+ */
+export async function captureFailureSnapshot(
+  cdp: SharedCdpRunner,
+  ctx: SessionContext,
+  tabId: number,
+  options: Pick<SnapshotParams, "max_depth" | "max_tokens"> = {},
+): Promise<SnapshotResult | RpcError> {
   try {
-    deps.cdp.trackSessionTab?.(ctx.sessionId, target.tabId);
-    await deps.cdp.send<unknown>(target.tabId, "Accessibility.enable", {});
-    const result = await deps.cdp.send<{ nodes: CdpAxNode[] }>(
-      target.tabId,
-      "Accessibility.getFullAXTree",
-      {},
-    );
-    const internalBackendNodeIds = await findInternalOverlayBackendNodeIds(deps.cdp, target.tabId);
+    cdp.trackSessionTab?.(ctx.sessionId, tabId);
+    await cdp.send<unknown>(tabId, "Accessibility.enable", {});
+    const result = await cdp.send<{ nodes: CdpAxNode[] }>(tabId, "Accessibility.getFullAXTree", {});
+    const internalBackendNodeIds = await findInternalOverlayBackendNodeIds(cdp, tabId);
     const visibleNodes = removeInternalAxNodes(result.nodes ?? [], internalBackendNodeIds);
     const rendered = renderAxTree(visibleNodes, {
-      maxDepth: params.max_depth,
-      maxTokens: params.max_tokens,
+      maxDepth: options.max_depth,
+      maxTokens: options.max_tokens,
     });
-    // Reset the session-scoped ref-store for this fresh snapshot.
     ctx.refStore.replace(
-      rendered.refs.map(
-        (r) => [r.ref, { backendNodeId: r.backendNodeId, tabId: target.tabId }] as const,
-      ),
+      rendered.refs.map((r) => [r.ref, { backendNodeId: r.backendNodeId, tabId }] as const),
     );
-    return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
+    return {
       text: rendered.text,
       ref_count: rendered.refs.length,
-      tab_id: target.tabId,
+      tab_id: tabId,
       truncated: rendered.truncated,
-    });
+    };
   } catch (err) {
     return {
       code: "cdp_failed",

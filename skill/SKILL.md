@@ -88,6 +88,10 @@ tabstride snapshot --session <id>            → again after navigation / DOM ch
 
 **Refs invalidate after navigation** — always re-snapshot before clicking, filling, or selecting on a new page.
 
+When an interaction or assertion fails, prefer `--json` and inspect `error.data.evidence` before
+retrying. It includes the failure Snapshot, Screenshot, Console errors, Locator match count,
+Actionability history, and phase timings. Do not discard or weaken an assertion merely to make it pass.
+
 Prefer `@eN` refs from the latest snapshot. When a stable ref is unavailable, pass exactly one
 semantic locator (`--role` + `--name`, `--label`, `--placeholder`, `--text`, or `--test-id`) or
 `--css`. Add `--exact` only to semantic locators. A locator must match exactly one element: handle

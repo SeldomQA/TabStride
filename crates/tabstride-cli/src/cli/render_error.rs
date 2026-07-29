@@ -310,7 +310,7 @@ pub fn info_for_error(code: ErrorCode, data: Option<&serde_json::Value>) -> Rend
         (ErrorCode::Timeout, reason::ASSERTION_FAILED) => RenderInfo {
             summary: "assertion did not pass before timeout",
             hint: Some(
-                "inspect error.data.expected and error.data.actual; verify the locator, expected value, and timeout",
+                "rerun with `--json` and inspect error.data.expected, actual, and evidence; verify the locator, expected value, and timeout",
             ),
             exit_code: base.exit_code,
         },
@@ -327,7 +327,7 @@ pub fn info_for_error(code: ErrorCode, data: Option<&serde_json::Value>) -> Rend
         ) => RenderInfo {
             summary: "target did not become actionable before timeout",
             hint: Some(
-                "inspect error.data.failed_check and error.data.last_state; verify the element is visible, stable, enabled, and unobscured",
+                "rerun with `--json` and inspect error.data.evidence; verify the element is visible, stable, enabled, and unobscured",
             ),
             exit_code: base.exit_code,
         },
@@ -464,7 +464,7 @@ mod tests {
             info.summary,
             "target did not become actionable before timeout"
         );
-        assert!(info.hint.unwrap().contains("failed_check"));
+        assert!(info.hint.unwrap().contains("evidence"));
         assert_eq!(info.exit_code, 4);
     }
 

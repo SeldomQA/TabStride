@@ -138,6 +138,21 @@ describe("Actionability Engine v1", () => {
     });
     if (!("code" in result)) throw new Error("expected timeout");
     expect(result.data?.elapsed_ms).toEqual(expect.any(Number));
+    expect(result.data?.actionability_history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attempt: expect.any(Number),
+          match_count: 1,
+          failed_check: "receives_events",
+          state: expect.objectContaining({ receives_events: false }),
+        }),
+      ]),
+    );
+    expect(result.data?.timing).toMatchObject({
+      locator_ms: expect.any(Number),
+      wait_ms: expect.any(Number),
+      cdp_ms: expect.any(Number),
+    });
   });
 
   it("waits for editability and returns structured state on timeout", async () => {

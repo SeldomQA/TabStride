@@ -7,6 +7,7 @@ import type {
   AssertionSpec,
   AssertParams,
   AssertResult,
+  FailureTiming,
   Locator,
   RpcError,
 } from "@/transport/types";
@@ -59,6 +60,12 @@ interface Attempt {
   retryError?: RpcError;
 }
 
+interface TimingAccumulator {
+  locatorMs: number;
+  waitMs: number;
+  cdpMs: number;
+}
+
 export interface AssertionDeps {
   cdp: CdpRunner;
   tabsApi: ChromeTabsApi;
@@ -95,15 +102,16 @@ export async function handleAssert(
     expected: params[name],
     matchCount: 0,
   };
+  const timing: TimingAccumulator = { locatorMs: 0, waitMs: 0, cdpMs: 0 };
 
   while (true) {
     if (deps.signal?.aborted) {
       return { code: "cancelled", message: "assertion wait aborted" };
     }
 
-    lastAttempt = await evaluateAttempt(deps.cdp, ctx, target.tabId, params, name);
+    lastAttempt = await evaluateAttempt(deps.cdp, ctx, target.tabId, params, name, timing);
     if (lastAttempt.retryError && !isRetryable(lastAttempt.retryError)) {
-      return lastAttempt.retryError;
+      return withAssertionDiagnostics(lastAttempt.retryError, params, lastAttempt, timing);
     }
     if (lastAttempt.passed) {
       return {
@@ -120,9 +128,10 @@ export async function handleAssert(
 
     const remainingMs = deadline - performance.now();
     if (remainingMs <= 0) {
-      return assertionTimeout(name, params, startedAt, lastAttempt);
+      return assertionTimeout(name, params, startedAt, lastAttempt, timing);
     }
     const waitMs = Math.min(POLL_INTERVAL_MS, remainingMs);
+    const waitStartedAt = performance.now();
     const wakeReason = deps.waitForChange
       ? await deps.waitForChange(waitMs)
       : await waitForPageChange(deps.cdp, target.tabId, {
@@ -130,6 +139,7 @@ export async function handleAssert(
           fallbackMs: POLL_INTERVAL_MS,
           signal: deps.signal,
         });
+    timing.waitMs += performance.now() - waitStartedAt;
     if (wakeReason === "cancelled" || deps.signal?.aborted) {
       return { code: "cancelled", message: "assertion wait aborted" };
     }
@@ -198,9 +208,12 @@ async function evaluateAttempt(
   tabId: number,
   params: AssertionSpec,
   name: AssertionName,
+  timing: TimingAccumulator,
 ): Promise<Attempt> {
   if (name === "url_equals" || name === "url_matches") {
+    const cdpStartedAt = performance.now();
     const current = await currentUrl(cdp, tabId);
+    timing.cdpMs += performance.now() - cdpStartedAt;
     const expected = params[name] as string;
     if (isRpcError(current)) {
       return { passed: false, actual: null, expected, matchCount: 0, retryError: current };
@@ -214,7 +227,9 @@ async function evaluateAttempt(
   }
 
   if (name === "count") {
+    const locatorStartedAt = performance.now();
     const counted = await countLocatorMatches(cdp, ctx, tabId, params.target);
+    timing.locatorMs += performance.now() - locatorStartedAt;
     const expected = params.count as number;
     if (isRpcError(counted)) {
       return { passed: false, actual: null, expected, matchCount: 0, retryError: counted };
@@ -228,7 +243,9 @@ async function evaluateAttempt(
     };
   }
 
+  const locatorStartedAt = performance.now();
   const resolved = await resolveLocator(cdp, ctx, tabId, params.target);
+  timing.locatorMs += performance.now() - locatorStartedAt;
   if (isRpcError(resolved)) {
     const expected = params[name];
     if (resolved.code === "not_found" && name === "hidden") {
@@ -251,7 +268,9 @@ async function evaluateAttempt(
     };
   }
 
+  const cdpStartedAt = performance.now();
   const state = await inspectElement(cdp, tabId, resolved.backendNodeId);
+  timing.cdpMs += performance.now() - cdpStartedAt;
   if (isRpcError(state)) {
     return {
       passed: false,
@@ -392,6 +411,7 @@ function assertionTimeout(
   params: AssertionSpec,
   startedAt: number,
   attempt: Attempt,
+  timing: TimingAccumulator,
 ): RpcError {
   const elapsedMs = elapsed(startedAt);
   return rpcError(
@@ -405,9 +425,37 @@ function assertionTimeout(
       elapsed_ms: elapsedMs,
       match_count: attempt.matchCount,
       locator: params.target,
+      timing: serialiseTiming(timing),
       last_error: attempt.retryError,
     },
   );
+}
+
+function withAssertionDiagnostics(
+  error: RpcError,
+  params: AssertionSpec,
+  attempt: Attempt,
+  timing: TimingAccumulator,
+): RpcError {
+  return {
+    ...error,
+    data: {
+      ...error.data,
+      locator: params.target,
+      match_count: attempt.matchCount,
+      timing: serialiseTiming(timing),
+    },
+  };
+}
+
+function serialiseTiming(
+  timing: TimingAccumulator,
+): Omit<FailureTiming, "evidence_ms" | "total_ms"> {
+  return {
+    locator_ms: Math.max(0, Math.round(timing.locatorMs)),
+    wait_ms: Math.max(0, Math.round(timing.waitMs)),
+    cdp_ms: Math.max(0, Math.round(timing.cdpMs)),
+  };
 }
 
 function elapsed(startedAt: number): number {

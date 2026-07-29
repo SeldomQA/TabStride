@@ -29,6 +29,7 @@ import { isRequestFrame } from "@/transport/types";
 import { handleAssert } from "./assertion";
 import { handleConsole } from "./console";
 import { handleEvaluate } from "./evaluate";
+import { enrichFailureEvidence } from "./failure-evidence";
 import { defaultWatchTabNavigation, handleRequestHelp } from "./human-loop";
 import { handleClick, handleFill, handlePress, handleSelect } from "./interaction";
 import {
@@ -366,10 +367,11 @@ export class ToolDispatcher {
           req.params as ReloadParams,
           this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
-      case "tool.click":
-        return handleClick(
+      case "tool.click": {
+        const params = req.params as ClickParams;
+        const result = await handleClick(
           this.sessions,
-          req.params as ClickParams,
+          params,
           this.cdp
             ? {
                 cdp: this.cdp,
@@ -388,30 +390,44 @@ export class ToolDispatcher {
               }
             : undefined,
         );
-      case "tool.fill":
-        return handleFill(
+        return this.withFailureEvidence(params, result, signal);
+      }
+      case "tool.fill": {
+        const params = req.params as FillParams;
+        const result = await handleFill(
           this.sessions,
-          req.params as FillParams,
+          params,
           this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
-      case "tool.press":
-        return handlePress(
+        return this.withFailureEvidence(params, result, signal);
+      }
+      case "tool.press": {
+        const params = req.params as PressParams;
+        const result = await handlePress(
           this.sessions,
-          req.params as PressParams,
+          params,
           this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
-      case "tool.select":
-        return handleSelect(
+        return this.withFailureEvidence(params, result, signal);
+      }
+      case "tool.select": {
+        const params = req.params as SelectParams;
+        const result = await handleSelect(
           this.sessions,
-          req.params as SelectParams,
+          params,
           this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
-      case "tool.assert":
-        return handleAssert(
+        return this.withFailureEvidence(params, result, signal);
+      }
+      case "tool.assert": {
+        const params = req.params as AssertParams;
+        const result = await handleAssert(
           this.sessions,
-          req.params as AssertParams,
+          params,
           this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
+        return this.withFailureEvidence(params, result, signal);
+      }
       case "tool.evaluate":
         return handleEvaluate(
           this.sessions,
@@ -444,6 +460,19 @@ export class ToolDispatcher {
           message: `${req.method} not implemented in extension`,
         } satisfies RpcError;
     }
+  }
+
+  private async withFailureEvidence<T>(
+    params: { session_id?: string; tab_id?: number; target?: ClickParams["target"] },
+    result: T | RpcError,
+    signal: AbortSignal,
+  ): Promise<T | RpcError> {
+    if (!this.cdp || !isRpcError(result)) return result;
+    return enrichFailureEvidence(this.sessions, params, result, {
+      cdp: this.cdp,
+      tabsApi: chromeTabsApi,
+      signal,
+    });
   }
 }
 

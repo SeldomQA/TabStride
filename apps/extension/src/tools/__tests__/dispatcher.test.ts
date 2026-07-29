@@ -8,6 +8,10 @@ import type {
   RequestFrame,
 } from "@/transport/types";
 import { ToolDispatcher } from "../dispatcher";
+import type { CdpRunner } from "../shared";
+
+const TINY_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABh6FO1AAAAABJRU5ErkJggg==";
 
 function fakeTransport() {
   const handlers = new Set<FrameHandler>();
@@ -188,6 +192,116 @@ describe("ToolDispatcher", () => {
         entries: [{ sequence: 1, kind: "console", level: "log", text: "hello", truncated: false }],
         next_since: 1,
         truncated: false,
+      },
+    });
+  });
+
+  it("attaches minimal evidence to failed assertions", async () => {
+    vi.stubGlobal("chrome", {
+      tabs: {
+        query: vi.fn(async () => [{ id: 7, windowId: 4242, active: true }]),
+      },
+    });
+    const { transport, sent, deliver } = fakeTransport();
+    const sessions = new SessionManager({
+      agentWindow: {
+        create: vi.fn(async () => 4242),
+        remove: vi.fn(async () => {}),
+        ensureActiveTab: vi.fn(async () => {}),
+      },
+    });
+    await sessions.start("aa11");
+    const cdp = {
+      send: vi.fn(async (_tabId: number, method: string, params?: object) => {
+        switch (method) {
+          case "DOM.getDocument":
+            return { root: { nodeId: 1 } };
+          case "DOM.querySelectorAll":
+            return { nodeIds: [9] };
+          case "DOM.querySelector":
+            return { nodeId: 0 };
+          case "DOM.describeNode":
+            return { node: { backendNodeId: 99 } };
+          case "DOM.resolveNode":
+            return { object: { objectId: "target" } };
+          case "Runtime.callFunctionOn":
+            return {
+              result: {
+                value: {
+                  attached: true,
+                  visible: false,
+                  text: "Save",
+                  value: null,
+                  enabled: true,
+                  checked: null,
+                },
+              },
+            };
+          case "Runtime.evaluate": {
+            const expression = String((params as { expression?: string })?.expression ?? "");
+            if (expression === "location.href") {
+              return { result: { value: "https://example.test/" } };
+            }
+            return { result: { value: "fallback" } };
+          }
+          case "Accessibility.enable":
+            return {};
+          case "Accessibility.getFullAXTree":
+            return {
+              nodes: [
+                {
+                  nodeId: "root",
+                  role: { value: "RootWebArea" },
+                  name: { value: "Example" },
+                },
+              ],
+            };
+          case "Page.captureScreenshot":
+            return { data: TINY_PNG };
+          default:
+            throw new Error(`unexpected CDP call ${method}`);
+        }
+      }) as unknown as CdpRunner["send"],
+      detachSession: vi.fn(async () => {}),
+      ensureConsoleCapture: vi.fn(async () => {}),
+      consoleEntriesSince: vi.fn(
+        () =>
+          ({
+            tab_id: 7,
+            entries: [],
+            next_since: 0,
+            truncated: false,
+          }) satisfies ConsoleResult,
+      ),
+    };
+    const dispatcher = new ToolDispatcher({ transport, sessions, cdp });
+    dispatcher.start();
+
+    deliver(
+      makeRequest("tool.assert", {
+        session_id: "aa11",
+        target: { css: "#save" },
+        visible: true,
+        timeout_ms: 1,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await flushMicrotasks();
+
+    expect(sent[0]).toMatchObject({
+      id: "r-1",
+      error: {
+        code: "timeout",
+        data: {
+          reason: "assertion_failed",
+          evidence: {
+            locator: { css: "#save" },
+            match_count: 1,
+            current_url: "https://example.test/",
+            snapshot: { text: 'RootWebArea "Example"' },
+            screenshot: { image_base64: TINY_PNG },
+          },
+        },
       },
     });
   });

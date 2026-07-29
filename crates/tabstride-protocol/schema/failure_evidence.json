@@ -1,0 +1,359 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FailureEvidence",
+  "type": "object",
+  "required": [
+    "match_count",
+    "timing"
+  ],
+  "properties": {
+    "actionability_history": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/FailureActionabilityAttempt"
+      }
+    },
+    "collection_errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "current_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_failed_check": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "locator": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Locator"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "match_count": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "recent_console_errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ConsoleEntry"
+      }
+    },
+    "screenshot": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FailureScreenshot"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "snapshot": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FailureSnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "timing": {
+      "$ref": "#/definitions/FailureTiming"
+    }
+  },
+  "definitions": {
+    "ConsoleEntry": {
+      "type": "object",
+      "required": [
+        "kind",
+        "level",
+        "sequence",
+        "text"
+      ],
+      "properties": {
+        "column": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "kind": {
+          "$ref": "#/definitions/ConsoleEntryKind"
+        },
+        "level": {
+          "type": "string"
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "stack_trace": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConsoleStackFrame"
+          }
+        },
+        "text": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "truncated": {
+          "default": false,
+          "type": "boolean"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ConsoleEntryKind": {
+      "type": "string",
+      "enum": [
+        "console",
+        "exception",
+        "log"
+      ]
+    },
+    "ConsoleStackFrame": {
+      "type": "object",
+      "properties": {
+        "column": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "function_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "FailureActionabilityAttempt": {
+      "type": "object",
+      "required": [
+        "attempt",
+        "elapsed_ms",
+        "failed_check",
+        "match_count",
+        "state"
+      ],
+      "properties": {
+        "attempt": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "elapsed_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "failed_check": {
+          "type": "string"
+        },
+        "match_count": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "state": true
+      }
+    },
+    "FailureScreenshot": {
+      "type": "object",
+      "required": [
+        "format",
+        "height",
+        "image_base64",
+        "width"
+      ],
+      "properties": {
+        "format": {
+          "type": "string"
+        },
+        "height": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "image_base64": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "FailureSnapshot": {
+      "type": "object",
+      "required": [
+        "ref_count",
+        "text"
+      ],
+      "properties": {
+        "ref_count": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "text": {
+          "type": "string"
+        },
+        "truncated": {
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    },
+    "FailureTiming": {
+      "type": "object",
+      "required": [
+        "cdp_ms",
+        "evidence_ms",
+        "locator_ms",
+        "total_ms",
+        "wait_ms"
+      ],
+      "properties": {
+        "cdp_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "evidence_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "locator_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "total_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "wait_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "Locator": {
+      "description": "Unified element locator used by CLI, Flow, and extension interaction tools. Exactly one primary strategy must be present. `role` additionally requires `name`; `exact` applies to semantic string strategies only.",
+      "type": "object",
+      "properties": {
+        "css": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exact": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "placeholder": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "testId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

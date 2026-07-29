@@ -7,7 +7,12 @@
 // caller never acts on a node captured before an actionability wait.
 
 import type { SessionContext } from "@/session-manager/manager";
-import type { Locator, RpcError } from "@/transport/types";
+import type {
+  FailureActionabilityAttempt,
+  FailureTiming,
+  Locator,
+  RpcError,
+} from "@/transport/types";
 import { type AutoWaitWakeReason, waitForPageChange } from "./auto-wait";
 import { scrollNodeIntoView } from "./element-geometry";
 import { rpcError } from "./errors";
@@ -91,15 +96,25 @@ export async function waitForActionable(
   let lastState: ActionabilityState | undefined;
   let lastFailedCheck: ActionabilityCheck = "attached";
   let lastLocatorError: RpcError | undefined;
+  let matchCount = 0;
+  let attempt = 0;
+  const history: FailureActionabilityAttempt[] = [];
+  const timing = { locatorMs: 0, waitMs: 0, cdpMs: 0 };
 
   while (true) {
     if (options.signal?.aborted) {
       return { code: "cancelled", message: `${action} actionability wait aborted` };
     }
 
+    attempt += 1;
+    const locatorStartedAt = performance.now();
     const resolved = await resolveLocator(cdp, ctx, tabId, locator);
+    timing.locatorMs += performance.now() - locatorStartedAt;
     if (isRpcError(resolved)) {
-      if (resolved.code !== "not_found") return resolved;
+      if (resolved.code !== "not_found") {
+        return withDiagnostics(resolved, locator, history, timing);
+      }
+      matchCount = 0;
       lastLocatorError = resolved;
       lastState = unavailableState();
       lastFailedCheck = "attached";
@@ -107,15 +122,20 @@ export async function waitForActionable(
       previousBackendNodeId = undefined;
       lastScrolledNodeId = undefined;
     } else {
+      matchCount = 1;
       lastLocatorError = undefined;
       // Scrolling is part of preparing an actionable element. Do it once per
       // freshly resolved backend node so a detached node cannot flood logs
       // during the wait loop.
       if (lastScrolledNodeId !== resolved.backendNodeId) {
+        const scrollStartedAt = performance.now();
         await scrollNodeIntoView(cdp, tabId, resolved.backendNodeId);
+        timing.cdpMs += performance.now() - scrollStartedAt;
         lastScrolledNodeId = resolved.backendNodeId;
       }
+      const inspectStartedAt = performance.now();
       const inspected = await inspectActionability(cdp, tabId, resolved.backendNodeId);
+      timing.cdpMs += performance.now() - inspectStartedAt;
       if (isRpcError(inspected)) {
         lastState = unavailableState();
         lastFailedCheck = "attached";
@@ -138,20 +158,32 @@ export async function waitForActionable(
         lastFailedCheck = failed;
       }
     }
+    history.push({
+      attempt,
+      elapsed_ms: elapsed(startedAt),
+      match_count: matchCount,
+      failed_check: lastFailedCheck,
+      state: { ...(lastState ?? unavailableState()) },
+    });
 
     const remainingMs = deadline - performance.now();
     if (remainingMs <= 0) {
       if (lastLocatorError) {
-        return locatorWaitError(action, locator, startedAt, lastLocatorError);
+        return locatorWaitError(action, locator, startedAt, lastLocatorError, history, timing);
       }
       return actionabilityError(
         action,
         lastFailedCheck,
         startedAt,
         lastState ?? unavailableState(),
+        locator,
+        matchCount,
+        history,
+        timing,
       );
     }
     const waitMs = Math.min(pollIntervalMs, remainingMs);
+    const waitStartedAt = performance.now();
     const wakeReason = options.waitForChange
       ? await options.waitForChange(waitMs)
       : await waitForPageChange(cdp, tabId, {
@@ -159,6 +191,7 @@ export async function waitForActionable(
           fallbackMs: pollIntervalMs,
           signal: options.signal,
         });
+    timing.waitMs += performance.now() - waitStartedAt;
     if (wakeReason === "cancelled" || options.signal?.aborted) {
       return { code: "cancelled", message: `${action} actionability wait aborted` };
     }
@@ -272,6 +305,10 @@ function actionabilityError(
   failedCheck: ActionabilityCheck,
   startedAt: number,
   state: ActionabilityState,
+  locator: Locator | undefined,
+  matchCount: number,
+  history: FailureActionabilityAttempt[],
+  timing: TimingAccumulator,
 ): RpcError {
   const reason = reasonForCheck(failedCheck);
   return rpcError(
@@ -282,6 +319,10 @@ function actionabilityError(
       failed_check: failedCheck,
       elapsed_ms: elapsed(startedAt),
       last_state: state,
+      locator,
+      match_count: matchCount,
+      actionability_history: history,
+      timing: serialiseTiming(timing),
     },
   );
 }
@@ -291,6 +332,8 @@ function locatorWaitError(
   locator: Locator | undefined,
   startedAt: number,
   lastError: RpcError,
+  history: FailureActionabilityAttempt[],
+  timing: TimingAccumulator,
 ): RpcError {
   const reason = lastError.data?.reason === "ref_not_found" ? "ref_not_found" : "locator_not_found";
   return rpcError("timeout", reason, `${action} target did not appear before timeout`, {
@@ -299,8 +342,43 @@ function locatorWaitError(
     last_state: unavailableState(),
     locator,
     match_count: 0,
+    actionability_history: history,
+    timing: serialiseTiming(timing),
     last_error: lastError,
   });
+}
+
+interface TimingAccumulator {
+  locatorMs: number;
+  waitMs: number;
+  cdpMs: number;
+}
+
+function serialiseTiming(
+  timing: TimingAccumulator,
+): Omit<FailureTiming, "evidence_ms" | "total_ms"> {
+  return {
+    locator_ms: Math.max(0, Math.round(timing.locatorMs)),
+    wait_ms: Math.max(0, Math.round(timing.waitMs)),
+    cdp_ms: Math.max(0, Math.round(timing.cdpMs)),
+  };
+}
+
+function withDiagnostics(
+  error: RpcError,
+  locator: Locator | undefined,
+  history: FailureActionabilityAttempt[],
+  timing: TimingAccumulator,
+): RpcError {
+  return {
+    ...error,
+    data: {
+      ...error.data,
+      locator,
+      actionability_history: history,
+      timing: serialiseTiming(timing),
+    },
+  };
 }
 
 function reasonForCheck(check: ActionabilityCheck) {

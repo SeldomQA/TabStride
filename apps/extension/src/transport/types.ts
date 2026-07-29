@@ -183,6 +183,48 @@ export interface ConsoleResult {
   truncated: boolean;
 }
 
+export interface FailureActionabilityAttempt {
+  attempt: number;
+  elapsed_ms: number;
+  match_count: number;
+  failed_check: string;
+  state: Record<string, unknown>;
+}
+
+export interface FailureTiming {
+  locator_ms: number;
+  wait_ms: number;
+  cdp_ms: number;
+  evidence_ms: number;
+  total_ms: number;
+}
+
+export interface FailureSnapshot {
+  text: string;
+  ref_count: number;
+  truncated: boolean;
+}
+
+export interface FailureScreenshot {
+  image_base64: string;
+  width: number;
+  height: number;
+  format: "png";
+}
+
+export interface FailureEvidence {
+  locator?: Locator;
+  match_count: number;
+  actionability_history?: FailureActionabilityAttempt[];
+  last_failed_check?: string;
+  current_url?: string;
+  snapshot?: FailureSnapshot;
+  screenshot?: FailureScreenshot;
+  recent_console_errors?: ConsoleEntry[];
+  timing: FailureTiming;
+  collection_errors?: string[];
+}
+
 export type TabScopeFilter = "user" | "agent" | "all";
 
 export interface TabInfo {
