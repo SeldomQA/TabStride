@@ -218,6 +218,22 @@ Each retry re-resolves the original Locator. Element assertions are strict excep
 `hidden` also succeeds when the target has no matches. Timeout errors include
 `reason=assertion_failed`, `expected`, `actual`, `elapsed_ms`, and `match_count`.
 
+### Inspect minimal failure evidence
+
+Failed interactions and assertions attach a best-effort `data.evidence` object to JSON errors. It
+contains the original Locator, match count, every Actionability attempt, the last failed check,
+current URL, failure-time accessibility Snapshot and PNG Screenshot, recent Console errors, and
+Locator/wait/CDP/evidence timing. Artifact collection never replaces the original error; partial
+collection failures are listed in `collection_errors`.
+
+```bash
+tabstride --json assert --css '#save' --visible --session "$session_id"
+```
+
+The requested `--timeout` remains the browser wait budget. The service allows up to two additional
+seconds only after failure so the extension can finish collecting evidence. Cancellation remains
+immediate and intentionally skips evidence collection.
+
 ### Persistent Agent client
 
 Agent harnesses that can keep a child process alive should use `tabstride client`. It performs one

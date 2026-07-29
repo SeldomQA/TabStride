@@ -193,6 +193,20 @@ tabstride assert --url-matches '/todomvc/#/completed$' --session "$session_id"
 0 匹配时也成立。超时错误包含 `reason=assertion_failed`、`expected`、`actual`、`elapsed_ms`
 和 `match_count`。
 
+### 查看最小失败 Evidence
+
+交互或断言失败时，JSON 错误会附带尽力采集的 `data.evidence`：原始 Locator、匹配数量、
+Actionability 每轮状态、最后失败检查、当前 URL、失败时的无障碍 Snapshot 和 PNG Screenshot、
+最近 Console Error，以及 Locator/等待/CDP/Evidence 分段耗时。采集失败不会覆盖原始错误，
+缺失内容会记录在 `collection_errors`。
+
+```bash
+tabstride --json assert --css '#save' --visible --session "$session_id"
+```
+
+`--timeout` 仍然只表示浏览器业务等待时间。失败后服务最多额外保留两秒，让扩展完成 Evidence
+采集；取消操作仍会立即结束，并主动跳过采集。
+
 ### 持久 Agent Client
 
 能够长期保持子进程的 Agent harness 应使用 `tabstride client`。它只与 `tabstride serve` 完成一次

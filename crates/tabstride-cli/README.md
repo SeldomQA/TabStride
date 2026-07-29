@@ -63,4 +63,9 @@ Assertions retry until success or timeout and support visible/hidden, text equal
 equals, enabled/disabled, checked/unchecked, count, and URL equals/matches. Flow `assert` steps and
 the CLI command use the same extension executor.
 
+Failed interactions and assertions expose minimal diagnostics under JSON `data.evidence`: Locator,
+match count, Actionability history, last failed check, current URL, Snapshot, PNG Screenshot,
+recent Console errors, and Locator/wait/CDP timings. Evidence collection is best-effort and never
+replaces the original error.
+
 Documentation: [../../README.md](../../README.md) · [../../docs/architecture.md](../../docs/architecture.md)
