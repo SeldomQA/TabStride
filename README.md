@@ -188,9 +188,19 @@ tabstride select --test-id country --value SG --session "$session_id"
 ```
 
 The compatibility positional form remains available for refs and CSS, such as
-`tabstride click @e3` or `tabstride click '#submit'`. Every Locator is strict: zero matches returns
-`not_found`, one match proceeds, and multiple matches return `ambiguous_target` instead of silently
-using the first element.
+`tabstride click @e3` or `tabstride click '#submit'`. Every Locator is strict: one match proceeds
+and multiple matches return `ambiguous_target` immediately instead of silently using the first
+element. Zero matches enter Auto Wait; if the target still has not appeared at the deadline, the
+command returns `timeout` with `reason=locator_not_found` (or `ref_not_found`).
+
+Before dispatching an interaction, the extension runs the same Actionability Engine for CLI and
+Flow. Click waits for an attached, visible, stable, enabled, event-receiving, unobscured target;
+fill additionally requires an editable control; select requires an enabled native `<select>`; and
+a targeted press requires a visible focusable element. Each command honours `--timeout`, can be
+cancelled, and re-resolves the original strict Locator after DOM mutations, page lifecycle events,
+or bounded geometry checks while the target's actionability state changes.
+Timeout errors include machine-readable `reason`, `failed_check`, `elapsed_ms`, and `last_state`
+fields when using `--json`.
 
 ### Persistent Agent client
 

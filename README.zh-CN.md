@@ -166,8 +166,16 @@ tabstride select --test-id country --value SG --session "$session_id"
 ```
 
 原有 ref/CSS 位置参数仍然可用，例如 `tabstride click @e3` 或 `tabstride click '#submit'`。
-所有 Locator 都执行严格匹配：0 个元素返回 `not_found`，1 个元素继续执行，多个元素返回
-`ambiguous_target`，不会静默选择第一个。
+所有 Locator 都执行严格匹配：1 个元素继续执行，多个元素立即返回 `ambiguous_target`，不会静默
+选择第一个。0 个元素会进入 Auto Wait；截止时间内仍未出现时返回 `timeout`，并携带
+`reason=locator_not_found`（Snapshot ref 则为 `ref_not_found`）。
+
+扩展在真正执行交互前，会为 CLI 和 Flow 运行同一套 Actionability Engine。click 会等待目标处于
+已连接、可见、稳定、启用、可接收事件且未被遮挡的状态；fill 还要求目标可编辑；select 要求目标是
+已启用的原生 `<select>`；指定目标的 press 要求元素可见且可聚焦。命令会遵守 `--timeout`、支持取消，
+并在 DOM 变化、页面生命周期事件或短周期几何检查后，用原始严格 Locator 重新解析目标。使用
+`--json` 时，超时错误包含 `reason`、`failed_check`、`elapsed_ms` 和 `last_state`
+等机器可读字段。
 
 ### 持久 Agent Client
 
