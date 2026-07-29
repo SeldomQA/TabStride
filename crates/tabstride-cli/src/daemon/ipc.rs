@@ -607,7 +607,7 @@ fn handle_cancel_with_registry_only(registry: &Arc<AbortRegistry>, params: Value
 
 fn tool_dispatch_timeout(params: &Value) -> Result<Duration, RpcError> {
     let Some(raw) = params.get("timeout_ms") else {
-        return Ok(DEFAULT_TOOL_TIMEOUT);
+        return Ok(DEFAULT_TOOL_TIMEOUT + FAILURE_EVIDENCE_GRACE);
     };
     let Some(ms) = raw.as_u64() else {
         return Err(RpcError {
@@ -628,8 +628,13 @@ fn tool_dispatch_timeout(params: &Value) -> Result<Duration, RpcError> {
         message: "timeout_ms too large for u32 milliseconds".into(),
         data: None,
     })?;
-    Ok(Duration::from_millis(u64::from(ms)))
+    Ok(Duration::from_millis(u64::from(ms)) + FAILURE_EVIDENCE_GRACE)
 }
+
+/// Browser-side waits use the caller's exact `timeout_ms`. The daemon keeps
+/// the request alive briefly afterwards so the extension can attach failure
+/// Snapshot/Screenshot/Console evidence without shortening that wait.
+const FAILURE_EVIDENCE_GRACE: Duration = Duration::from_secs(2);
 
 // Local CLI-facing shapes. Intentionally distinct from
 // `tabstride_protocol::tools::SessionStart*` (which describes the WS-facing
@@ -1331,7 +1336,7 @@ mod tests {
 
         assert_eq!(
             tool_dispatch_timeout(&params).unwrap(),
-            Duration::from_secs(60)
+            Duration::from_secs(60) + FAILURE_EVIDENCE_GRACE
         );
     }
 
@@ -1343,7 +1348,10 @@ mod tests {
             "timeout_ms": 300_000,
         });
         let got = tool_dispatch_timeout(&params).expect("timeout parses");
-        assert_eq!(got, std::time::Duration::from_millis(300_000));
+        assert_eq!(
+            got,
+            std::time::Duration::from_millis(300_000) + FAILURE_EVIDENCE_GRACE
+        );
     }
 
     #[test]
