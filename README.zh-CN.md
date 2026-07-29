@@ -177,6 +177,22 @@ tabstride select --test-id country --value SG --session "$session_id"
 `--json` 时，超时错误包含 `reason`、`failed_check`、`elapsed_ms` 和 `last_state`
 等机器可读字段。
 
+### 使用 Auto Wait 断言页面状态
+
+`tabstride assert` 会持续重试页面状态，直到断言成立或达到 `--timeout`。元素断言支持
+visible/hidden、文本 equals/contains、value equals、enabled/disabled、checked/unchecked 和匹配数量；
+URL 断言支持完全相等和 JavaScript 正则表达式：
+
+```bash
+tabstride assert --text "写代码" --exact --visible --session "$session_id"
+tabstride assert --css '.todo.completed' --count 3 --session "$session_id"
+tabstride assert --url-matches '/todomvc/#/completed$' --session "$session_id"
+```
+
+每轮重试都会使用原始 Locator 重新解析元素。除 `count` 外，元素断言保持严格匹配；`hidden` 在
+0 匹配时也成立。超时错误包含 `reason=assertion_failed`、`expected`、`actual`、`elapsed_ms`
+和 `match_count`。
+
 ### 持久 Agent Client
 
 能够长期保持子进程的 Agent harness 应使用 `tabstride client`。它只与 `tabstride serve` 完成一次
@@ -202,11 +218,23 @@ tabstride flow validate examples/flows/todomvc.yaml
 tabstride flow run examples/flows/todomvc.yaml --session "$session_id" --var task="写代码"
 ```
 
-Flow v1 支持 `navigate`、`click`、`fill`、`press`、`snapshot` 和 daemon 本地的 `wait_ms`。
+Flow v1 支持 `navigate`、`click`、`fill`、`press`、`assert`、`snapshot` 和 daemon 本地的
+`wait_ms`。
 所有步骤按顺序复用单条命令使用的同一个 Session 队列；第一步失败后立即停止，并返回失败步骤及已完成
 步骤的耗时。Flow 总 `timeout` 与各工具的 `timeout_ms` 独立生效，Ctrl+C 会取消当前步骤和剩余 Flow。
 Flow 与单条 CLI 命令使用相同的 Locator 对象和执行路径。例如
 `target: { role: button, name: 保存, exact: true }` 的匹配规则、错误、作用域和超时行为完全一致。
+
+Flow Assertion 与 `tabstride assert` 共用扩展执行器：
+
+```yaml
+- assert:
+    target:
+      text: 写代码
+      exact: true
+    visible: true
+    timeout_ms: 5000
+```
 
 业务请求会记录日志，但不会记录请求内容：
 

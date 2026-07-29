@@ -202,6 +202,22 @@ or bounded geometry checks while the target's actionability state changes.
 Timeout errors include machine-readable `reason`, `failed_check`, `elapsed_ms`, and `last_state`
 fields when using `--json`.
 
+### Assert page state with Auto Wait
+
+`tabstride assert` retries page state until it passes or reaches `--timeout`. Element assertions
+support visible/hidden, text equals/contains, value equals, enabled/disabled, checked/unchecked,
+and match count. URL assertions support equality and JavaScript regular expressions:
+
+```bash
+tabstride assert --text "Write code" --exact --visible --session "$session_id"
+tabstride assert --css '.todo.completed' --count 3 --session "$session_id"
+tabstride assert --url-matches '/todomvc/#/completed$' --session "$session_id"
+```
+
+Each retry re-resolves the original Locator. Element assertions are strict except `count`;
+`hidden` also succeeds when the target has no matches. Timeout errors include
+`reason=assertion_failed`, `expected`, `actual`, `elapsed_ms`, and `match_count`.
+
 ### Persistent Agent client
 
 Agent harnesses that can keep a child process alive should use `tabstride client`. It performs one
@@ -229,13 +245,25 @@ tabstride flow validate examples/flows/todomvc.yaml
 tabstride flow run examples/flows/todomvc.yaml --session "$session_id" --var task="write code"
 ```
 
-Flow v1 supports `navigate`, `click`, `fill`, `press`, `snapshot`, and daemon-side `wait_ms` steps.
+Flow v1 supports `navigate`, `click`, `fill`, `press`, `assert`, `snapshot`, and daemon-side
+`wait_ms` steps.
 Steps run in order through the same session queue as individual CLI commands; the first failure
 stops the flow and reports the failed step plus completed-step timings. A total `timeout` and each
 tool's `timeout_ms` are independent, and Ctrl+C cancels the active step and the remaining flow.
 Flow targets use the same Locator object and execution path as individual commands. For example,
 `target: { role: button, name: Save, exact: true }` has identical matching, errors, scope, and
 timeout behavior.
+
+Assertions use the same extension executor as `tabstride assert`:
+
+```yaml
+- assert:
+    target:
+      text: Write code
+      exact: true
+    visible: true
+    timeout_ms: 5000
+```
 
 Business requests are logged without their payloads:
 
