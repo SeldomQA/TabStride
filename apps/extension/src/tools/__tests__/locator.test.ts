@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionManager } from "@/session-manager/manager";
 import type { CdpRunner } from "@/tools/shared";
 import type { Locator } from "@/transport/types";
-import { resolveLocator, semanticLocatorExpression, validateLocator } from "../locator";
+import {
+  countLocatorMatches,
+  resolveLocator,
+  semanticLocatorExpression,
+  validateLocator,
+} from "../locator";
 
 function fakeAgentWindow() {
   return {
@@ -163,6 +168,35 @@ describe("resolveLocator strict matching", () => {
       backendNodeId: 77,
       usedTarget: { role: "button", name: "Save", exact: true },
       matchCount: 1,
+    });
+  });
+});
+
+describe("countLocatorMatches", () => {
+  it("counts every CSS match without strict ambiguity", async () => {
+    const manager = new SessionManager({ agentWindow: fakeAgentWindow() });
+    const ctx = await manager.start("aa11");
+    const cdp = fakeCdp({
+      "DOM.getDocument": () => ({ root: { nodeId: 1 } }),
+      "DOM.querySelectorAll": () => ({ nodeIds: [7, 8, 9] }),
+    });
+    await expect(countLocatorMatches(cdp, ctx, 4, { css: ".todo" })).resolves.toEqual({
+      matchCount: 3,
+      usedTarget: { css: ".todo" },
+    });
+  });
+
+  it("does not count a detached snapshot ref", async () => {
+    const manager = new SessionManager({ agentWindow: fakeAgentWindow() });
+    const ctx = await manager.start("aa11");
+    ctx.refStore.set("e1", 55, { tabId: 4 });
+    const cdp = fakeCdp({
+      "DOM.resolveNode": () => ({ object: { objectId: "stale-node" } }),
+      "Runtime.callFunctionOn": () => ({ result: { value: false } }),
+    });
+    await expect(countLocatorMatches(cdp, ctx, 4, { ref: "@e1" })).resolves.toEqual({
+      matchCount: 0,
+      usedTarget: { ref: "e1" },
     });
   });
 });

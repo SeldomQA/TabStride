@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FlowRunResult",
+  "type": "object",
+  "required": [
+    "completed_steps",
+    "duration_ms",
+    "name"
+  ],
+  "properties": {
+    "completed_steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/FlowStepResult"
+      }
+    },
+    "duration_ms": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "name": {
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "FlowStepResult": {
+      "type": "object",
+      "required": [
+        "duration_ms",
+        "index",
+        "method",
+        "output"
+      ],
+      "properties": {
+        "duration_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "index": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "method": {
+          "type": "string"
+        },
+        "output": true
+      }
+    }
+  }
+}

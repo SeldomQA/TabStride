@@ -36,7 +36,7 @@ tabstride flow validate examples/flows/todomvc.yaml
 tabstride flow run examples/flows/todomvc.yaml --session abcd --var task="write code"
 ```
 
-Flow v1 runs `navigate`, `click`, `fill`, `press`, `snapshot`, and `wait_ms` through the existing
+Flow v1 runs `navigate`, `click`, `fill`, `press`, `assert`, `snapshot`, and `wait_ms` through the existing
 session queue. It stops at the first failure, reports per-step timings, and propagates timeout and
 cancel to the active child operation. Interaction targets share the same strict Locator in CLI and
 Flow: exactly one of `ref`, `css`, `role` + `name`, `label`, `placeholder`, `text`, or `testId`,
@@ -55,6 +55,12 @@ tabstride click --role button --name Save --exact --session abcd
 tabstride fill --label Email --value agent@example.com --session abcd
 tabstride press Enter --placeholder "Add a task" --session abcd
 tabstride select --test-id country --value SG --session abcd
+tabstride assert --text "Write code" --exact --visible --session abcd
+tabstride assert --css '.todo.completed' --count 3 --session abcd
 ```
+
+Assertions retry until success or timeout and support visible/hidden, text equals/contains, value
+equals, enabled/disabled, checked/unchecked, count, and URL equals/matches. Flow `assert` steps and
+the CLI command use the same extension executor.
 
 Documentation: [../../README.md](../../README.md) · [../../docs/architecture.md](../../docs/architecture.md)

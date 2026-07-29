@@ -29,19 +29,6 @@
         "$ref": "#/definitions/KeyModifier"
       }
     },
-    "ref": {
-      "description": "Optional target to focus before dispatching the key.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "selector": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "session_id": {
       "type": "string"
     },
@@ -51,6 +38,17 @@
         "null"
       ],
       "format": "int64"
+    },
+    "target": {
+      "description": "Optional target to focus before dispatching the key.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Locator"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "timeout_ms": {
       "type": [
@@ -71,6 +69,67 @@
         "meta",
         "shift"
       ]
+    },
+    "Locator": {
+      "description": "Unified element locator used by CLI, Flow, and extension interaction tools. Exactly one primary strategy must be present. `role` additionally requires `name`; `exact` applies to semantic string strategies only.",
+      "type": "object",
+      "properties": {
+        "css": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exact": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "placeholder": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "testId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

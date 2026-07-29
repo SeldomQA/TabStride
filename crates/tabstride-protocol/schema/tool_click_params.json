@@ -3,7 +3,8 @@
   "title": "ClickParams",
   "type": "object",
   "required": [
-    "session_id"
+    "session_id",
+    "target"
   ],
   "properties": {
     "button": {
@@ -34,19 +35,6 @@
         "$ref": "#/definitions/KeyModifier"
       }
     },
-    "ref": {
-      "description": "Optional `@e<N>` ref allocated by the last `tool.snapshot`. Mutually exclusive with `selector` (caller must supply exactly one). Accepts both `\"e3\"` and `\"@e3\"`.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "selector": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "session_id": {
       "type": "string"
     },
@@ -57,6 +45,9 @@
         "null"
       ],
       "format": "int64"
+    },
+    "target": {
+      "$ref": "#/definitions/Locator"
     },
     "timeout_ms": {
       "type": [
@@ -77,6 +68,67 @@
         "meta",
         "shift"
       ]
+    },
+    "Locator": {
+      "description": "Unified element locator used by CLI, Flow, and extension interaction tools. Exactly one primary strategy must be present. `role` additionally requires `name`; `exact` applies to semantic string strategies only.",
+      "type": "object",
+      "properties": {
+        "css": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exact": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "placeholder": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "testId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "MouseButton": {
       "description": "Mouse button selector for `tool.click`.",

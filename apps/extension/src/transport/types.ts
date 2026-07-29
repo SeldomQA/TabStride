@@ -35,6 +35,7 @@ export type RpcErrorReason =
   | "element_not_editable"
   | "element_obscured"
   | "element_not_focusable"
+  | "assertion_failed"
   | "target_not_fillable"
   | "target_not_select"
   | "option_not_found"
@@ -451,6 +452,39 @@ export interface SelectResult {
   selected_values: string[];
   selected_labels: string[];
   dialogs?: JavaScriptDialogInfo[];
+}
+
+export interface AssertionSpec {
+  target?: Locator;
+  tab_id?: number;
+  visible?: boolean;
+  hidden?: boolean;
+  text_equals?: string;
+  text_contains?: string;
+  value_equals?: string;
+  enabled?: boolean;
+  disabled?: boolean;
+  checked?: boolean;
+  unchecked?: boolean;
+  count?: number;
+  url_equals?: string;
+  url_matches?: string;
+  timeout_ms?: number;
+}
+
+export interface AssertParams extends AssertionSpec {
+  session_id: string;
+}
+
+export interface AssertResult {
+  tab_id: number;
+  assertion: string;
+  passed: boolean;
+  elapsed_ms: number;
+  expected: unknown;
+  actual: unknown;
+  match_count: number;
+  used_target?: Locator;
 }
 
 // --------------------------------------------------------------------------

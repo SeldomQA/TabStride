@@ -83,6 +83,43 @@ fn parses_flow_validate_and_run() {
 }
 
 #[test]
+fn parses_web_first_assertions() {
+    let cli = parse(&[
+        "tabstride",
+        "assert",
+        "--session",
+        "abcd",
+        "--text",
+        "Write code",
+        "--exact",
+        "--visible",
+        "--timeout",
+        "5s",
+    ]);
+    let Command::Assert(args) = cli.command else {
+        panic!("expected assert command");
+    };
+    assert!(args.visible);
+    assert_eq!(args.locator.text.as_deref(), Some("Write code"));
+    assert!(args.locator.exact);
+    assert_eq!(args.timeout, 5_000);
+
+    assert!(
+        Cli::try_parse_from([
+            "tabstride",
+            "assert",
+            "--session",
+            "abcd",
+            "--css",
+            "#save",
+            "--visible",
+            "--enabled",
+        ])
+        .is_err()
+    );
+}
+
+#[test]
 fn parses_daemon_start_with_flags() {
     let cli = parse(&[
         "tabstride",

@@ -1051,9 +1051,7 @@ describe("handleSelect", () => {
       code: "invalid_params",
       data: { reason: "single_select_value_count" },
     });
-    expect(
-      fake.sent.some(isSelectMutationCall),
-    ).toBe(false);
+    expect(fake.sent.some(isSelectMutationCall)).toBe(false);
   });
 
   it("stops before mutation when abort fires after focus", async () => {
@@ -1079,8 +1077,6 @@ describe("handleSelect", () => {
       { cdp: fake.cdp, tabsApi: fake.tabsApi, signal: abort.signal },
     );
     expect(res).toMatchObject({ code: "cancelled" });
-    expect(
-      fake.sent.some(isSelectMutationCall),
-    ).toBe(false);
+    expect(fake.sent.some(isSelectMutationCall)).toBe(false);
   });
 });

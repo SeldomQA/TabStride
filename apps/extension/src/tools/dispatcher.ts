@@ -4,6 +4,7 @@ import { OVERLAY_AUTOMATION_BYPASS } from "@/lib/overlay-bridge";
 import type { SessionManager } from "@/session-manager/manager";
 import type { Transport } from "@/transport/transport";
 import type {
+  AssertParams,
   ClickParams,
   ConsoleParams,
   EvaluateParams,
@@ -25,6 +26,7 @@ import type {
   WaitForNavigationParams,
 } from "@/transport/types";
 import { isRequestFrame } from "@/transport/types";
+import { handleAssert } from "./assertion";
 import { handleConsole } from "./console";
 import { handleEvaluate } from "./evaluate";
 import { defaultWatchTabNavigation, handleRequestHelp } from "./human-loop";
@@ -402,6 +404,12 @@ export class ToolDispatcher {
         return handleSelect(
           this.sessions,
           req.params as SelectParams,
+          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
+        );
+      case "tool.assert":
+        return handleAssert(
+          this.sessions,
+          req.params as AssertParams,
           this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
       case "tool.evaluate":

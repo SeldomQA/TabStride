@@ -59,6 +59,8 @@ pub enum Method {
     ToolPress,
     #[serde(rename = "tool.select")]
     ToolSelect,
+    #[serde(rename = "tool.assert")]
+    ToolAssert,
     #[serde(rename = "tool.snapshot")]
     ToolSnapshot,
     #[serde(rename = "tool.get_html")]
@@ -112,6 +114,7 @@ impl Method {
             Method::ToolFill => "tool.fill",
             Method::ToolPress => "tool.press",
             Method::ToolSelect => "tool.select",
+            Method::ToolAssert => "tool.assert",
             Method::ToolSnapshot => "tool.snapshot",
             Method::ToolGetHtml => "tool.get_html",
             Method::ToolScreenshot => "tool.screenshot",
@@ -173,6 +176,7 @@ impl Method {
 
             // Read-only tool calls — transparent.
             Method::ToolTabList
+            | Method::ToolAssert
             | Method::ToolSnapshot
             | Method::ToolGetHtml
             | Method::ToolScreenshot
@@ -221,6 +225,7 @@ mod tests {
             Method::ToolNavigate,
             Method::ToolSnapshot,
             Method::ToolClick,
+            Method::ToolAssert,
             Method::Cancel,
         ] {
             assert_eq!(
@@ -251,6 +256,7 @@ mod tests {
     #[test]
     fn is_mutating_classifies_read_only_tools_as_non_mutating() {
         assert!(!Method::ToolTabList.is_mutating());
+        assert!(!Method::ToolAssert.is_mutating());
         assert!(!Method::ToolSnapshot.is_mutating());
         assert!(!Method::ToolGetHtml.is_mutating());
         assert!(!Method::ToolScreenshot.is_mutating());

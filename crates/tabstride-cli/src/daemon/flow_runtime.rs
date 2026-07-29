@@ -149,6 +149,7 @@ impl FlowStepExt for FlowStep {
             Self::Click(_) => Method::ToolClick,
             Self::Fill(_) => Method::ToolFill,
             Self::Press(_) => Method::ToolPress,
+            Self::Assert(_) => Method::ToolAssert,
             Self::Snapshot(_) => Method::ToolSnapshot,
             Self::WaitMs(_) => Method::ToolWaitMs,
         }
@@ -160,6 +161,7 @@ impl FlowStepExt for FlowStep {
             Self::Click(entry) => with_session(entry.click, session_id),
             Self::Fill(entry) => with_session(entry.fill, session_id),
             Self::Press(entry) => with_session(entry.press, session_id),
+            Self::Assert(entry) => with_session(entry.assertion, session_id),
             Self::Snapshot(entry) => with_session(entry.snapshot, session_id),
             Self::WaitMs(entry) => serde_json::to_value(entry.wait_ms).unwrap_or(Value::Null),
         }

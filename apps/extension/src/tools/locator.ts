@@ -12,6 +12,11 @@ export interface ResolvedLocator {
   matchCount: 1;
 }
 
+export interface LocatorMatchCount {
+  matchCount: number;
+  usedTarget: Locator;
+}
+
 const STRATEGY_KEYS = ["ref", "css", "role", "label", "placeholder", "text", "testId"] as const;
 
 export function validateLocator(locator: Locator | undefined): RpcError | null {
@@ -83,6 +88,103 @@ export async function resolveLocator(
     return resolveCss(cdp, tabId, target);
   }
   return resolveSemantic(cdp, tabId, target);
+}
+
+/**
+ * Count all matches without applying strict single-match semantics. This is
+ * intentionally only used by `assert count`; action targets still resolve
+ * through `resolveLocator`.
+ */
+export async function countLocatorMatches(
+  cdp: CdpRunner,
+  ctx: SessionContext,
+  tabId: number,
+  locator: Locator | undefined,
+): Promise<LocatorMatchCount | RpcError> {
+  const invalid = validateLocator(locator);
+  if (invalid) return invalid;
+  const target = locator as Locator;
+  if (target.ref) {
+    const resolved = resolveSnapshotRef(ctx, target.ref, tabId);
+    if (isRpcError(resolved)) {
+      if (resolved.code === "not_found") {
+        return { matchCount: 0, usedTarget: { ref: target.ref } };
+      }
+      return resolved;
+    }
+    try {
+      const remote = await cdp.send<{ object?: { objectId?: string } }>(tabId, "DOM.resolveNode", {
+        backendNodeId: resolved.backendNodeId,
+      });
+      const objectId = remote.object?.objectId;
+      if (!objectId) return { matchCount: 0, usedTarget: { ref: resolved.refKey } };
+      const attached = await cdp.send<{ result?: { value?: unknown } }>(
+        tabId,
+        "Runtime.callFunctionOn",
+        {
+          objectId,
+          functionDeclaration:
+            "function () { return this instanceof Element && this.isConnected; }",
+          returnByValue: true,
+        },
+      );
+      return {
+        matchCount: attached.result?.value === true ? 1 : 0,
+        usedTarget: { ref: resolved.refKey },
+      };
+    } catch (error) {
+      return {
+        code: "cdp_failed",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+  if (target.css) {
+    try {
+      const doc = await cdp.send<{ root?: { nodeId?: number } }>(tabId, "DOM.getDocument", {
+        depth: 0,
+      });
+      const rootNodeId = doc.root?.nodeId;
+      if (typeof rootNodeId !== "number") {
+        return { code: "cdp_failed", message: "DOM.getDocument returned no root nodeId" };
+      }
+      const found = await cdp.send<{ nodeIds?: number[] }>(tabId, "DOM.querySelectorAll", {
+        nodeId: rootNodeId,
+        selector: target.css,
+      });
+      return { matchCount: (found.nodeIds ?? []).length, usedTarget: { css: target.css } };
+    } catch (error) {
+      return {
+        code: "invalid_params",
+        message: `invalid CSS locator: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+  try {
+    const evaluated = await cdp.send<{
+      result?: { value?: unknown };
+      exceptionDetails?: { text?: string };
+    }>(tabId, "Runtime.evaluate", {
+      expression: `(${semanticLocatorExpression(target)}).length`,
+      returnByValue: true,
+    });
+    if (evaluated.exceptionDetails) {
+      return {
+        code: "cdp_failed",
+        message: evaluated.exceptionDetails.text ?? "semantic locator evaluation failed",
+      };
+    }
+    const matchCount = evaluated.result?.value;
+    if (typeof matchCount !== "number" || !Number.isSafeInteger(matchCount) || matchCount < 0) {
+      return { code: "cdp_failed", message: "semantic locator returned an invalid match count" };
+    }
+    return { matchCount, usedTarget: { ...target } };
+  } catch (error) {
+    return {
+      code: "cdp_failed",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 async function resolveCss(

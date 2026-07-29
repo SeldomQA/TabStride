@@ -67,6 +67,7 @@
       "fill": "Fill",
       "press": "Press key",
       "select": "Select",
+      "assert": "Assert",
       "evaluate": "Run script",
       "wait_for_navigation": "Wait for page",
       "request_help": "Request help",

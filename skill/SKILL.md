@@ -69,7 +69,7 @@ tabstride flow validate <flow.yaml>
 tabstride flow run <flow.yaml> --session <id> --var key=value
 ```
 
-Use Flow v1 only for deterministic `navigate`, `click`, `fill`, `press`, `snapshot`, and `wait_ms`
+Use Flow v1 only for deterministic `navigate`, `click`, `fill`, `press`, `assert`, `snapshot`, and `wait_ms`
 steps. Flow and individual commands use the same strict Locator and execution path. A flow stops on
 its first failure; do not rewrite or skip the failed step silently. Ctrl+C cancels the active step
 and the rest of the flow. Continue to use individual commands when the next action depends on
@@ -192,12 +192,15 @@ Details and flags: **`tabstride <cmd> --help`**
 | `tabstride fill <ref-or-css> --value <text>` | Clear and type into one strict target; also accepts semantic Locator flags |
 | `tabstride select <ref-or-css> --value <v>` | Set one strict `<select>` target by `value`; repeat `--value` for multi-select |
 | `tabstride press <key>` | Key/combo (`Enter`, `Ctrl+A`, …); optional ref, CSS, or semantic Locator focuses one target first |
+| `tabstride assert` | Web-first assertion with Auto Wait; supports element state/count and URL equality/regex |
 
 Locator examples:
 
 ```
 tabstride click --role button --name Save --exact --session <id>
 tabstride fill --label Email --value agent@example.com --session <id>
+tabstride assert --text "Write code" --exact --visible --session <id>
+tabstride assert --css '.todo.completed' --count 3 --session <id>
 tabstride press Enter --placeholder "Add a task" --session <id>
 tabstride select --test-id country --value SG --session <id>
 ```

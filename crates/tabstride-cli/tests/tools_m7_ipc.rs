@@ -17,10 +17,11 @@ use tabstride::daemon::{self, DaemonConfig};
 use tabstride::ipc_client::IpcClient;
 use tabstride_protocol::system::{HandshakeParams, HandshakeResult};
 use tabstride_protocol::tools::{
-    ClickParams, ClickResult, FillParams, FillResult, KeyModifier, Locator, MouseButton,
-    NavigateBackParams, NavigateBackResult, NavigateForwardParams, NavigateForwardResult,
-    NavigateParams, NavigateResult, PressParams, PressResult, ReloadParams, ReloadResult,
-    SelectParams, SelectResult, SessionStartParams, SessionStartResult, WaitUntil,
+    AssertParams, AssertResult, AssertionSpec, ClickParams, ClickResult, FillParams, FillResult,
+    KeyModifier, Locator, MouseButton, NavigateBackParams, NavigateBackResult,
+    NavigateForwardParams, NavigateForwardResult, NavigateParams, NavigateResult, PressParams,
+    PressResult, ReloadParams, ReloadResult, SelectParams, SelectResult, SessionStartParams,
+    SessionStartResult, WaitUntil,
 };
 use tabstride_protocol::{
     BrowserPeerInfo, ErrorCode, FlowDefinition, FlowRunParams, FlowRunResult, Frame, Method,
@@ -389,6 +390,101 @@ steps:
     assert_eq!(direct.used_target, target);
     assert_eq!(flow_click.used_target, target);
     assert_eq!(*seen.lock().unwrap(), vec![target.clone(), target]);
+    handle.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn individual_assertion_and_flow_share_the_same_executor_payload() {
+    let (handle, sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    let _ = do_handshake(&mut ws).await;
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<AssertionSpec>::new()));
+    let seen_by_extension = Arc::clone(&seen);
+    run_extension(ws, move |req| {
+        assert_eq!(req.method, Method::ToolAssert);
+        let params: AssertParams =
+            serde_json::from_value(req.params.clone().expect("assert params")).unwrap();
+        seen_by_extension
+            .lock()
+            .unwrap()
+            .push(params.assertion.clone());
+        ResponseBody::Ok(
+            serde_json::to_value(AssertResult {
+                tab_id: 17,
+                assertion: "visible".into(),
+                passed: true,
+                elapsed_ms: 4,
+                expected: json!(true),
+                actual: json!(true),
+                match_count: 1,
+                used_target: params.assertion.target,
+            })
+            .unwrap(),
+        )
+    });
+
+    let session_id = ipc_session_start(&sock).await;
+    let assertion = AssertionSpec {
+        target: Some(Locator {
+            text: Some("Write code".into()),
+            exact: Some(true),
+            ..Locator::default()
+        }),
+        tab_id: None,
+        visible: Some(true),
+        hidden: None,
+        text_equals: None,
+        text_contains: None,
+        value_equals: None,
+        enabled: None,
+        disabled: None,
+        checked: None,
+        unchecked: None,
+        count: None,
+        url_equals: None,
+        url_matches: None,
+        timeout_ms: Some(5_000),
+    };
+    let direct: AssertResult = ipc_tool_call(
+        &sock,
+        Method::ToolAssert,
+        AssertParams {
+            session_id: session_id.clone(),
+            assertion: assertion.clone(),
+        },
+    )
+    .await
+    .expect("direct assertion ok");
+
+    let flow: FlowDefinition = serde_yaml::from_str(
+        r#"name: assertion-parity
+steps:
+  - assert:
+      target:
+        text: Write code
+        exact: true
+      visible: true
+      timeout_ms: 5000
+"#,
+    )
+    .unwrap();
+    let flow_result: FlowRunResult = ipc_tool_call(
+        &sock,
+        Method::FlowRun,
+        FlowRunParams {
+            session_id,
+            flow,
+            variables: std::collections::BTreeMap::new(),
+        },
+    )
+    .await
+    .expect("flow assertion ok");
+    let flow_assertion: AssertResult =
+        serde_json::from_value(flow_result.completed_steps[0].output.clone()).unwrap();
+
+    assert!(direct.passed);
+    assert!(flow_assertion.passed);
+    assert_eq!(*seen.lock().unwrap(), vec![assertion.clone(), assertion]);
     handle.shutdown().await;
 }
 

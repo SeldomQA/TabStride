@@ -50,6 +50,7 @@ pub mod reason {
     pub const ELEMENT_NOT_EDITABLE: &str = "element_not_editable";
     pub const ELEMENT_OBSCURED: &str = "element_obscured";
     pub const ELEMENT_NOT_FOCUSABLE: &str = "element_not_focusable";
+    pub const ASSERTION_FAILED: &str = "assertion_failed";
     pub const TARGET_NOT_FILLABLE: &str = "target_not_fillable";
     pub const TARGET_NOT_SELECT: &str = "target_not_select";
     pub const OPTION_NOT_FOUND: &str = "option_not_found";
@@ -306,6 +307,13 @@ pub fn info_for_error(code: ErrorCode, data: Option<&serde_json::Value>) -> Rend
             ),
             exit_code: base.exit_code,
         },
+        (ErrorCode::Timeout, reason::ASSERTION_FAILED) => RenderInfo {
+            summary: "assertion did not pass before timeout",
+            hint: Some(
+                "inspect error.data.expected and error.data.actual; verify the locator, expected value, and timeout",
+            ),
+            exit_code: base.exit_code,
+        },
         (
             ErrorCode::Timeout,
             reason::ELEMENT_DETACHED
@@ -457,6 +465,19 @@ mod tests {
             "target did not become actionable before timeout"
         );
         assert!(info.hint.unwrap().contains("failed_check"));
+        assert_eq!(info.exit_code, 4);
+    }
+
+    #[test]
+    fn assertion_timeout_has_expected_actual_hint() {
+        let data = serde_json::json!({
+            "reason": reason::ASSERTION_FAILED,
+            "expected": "ready",
+            "actual": "loading"
+        });
+        let info = info_for_error(ErrorCode::Timeout, Some(&data));
+        assert_eq!(info.summary, "assertion did not pass before timeout");
+        assert!(info.hint.unwrap().contains("expected"));
         assert_eq!(info.exit_code, 4);
     }
 

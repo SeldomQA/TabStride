@@ -26,6 +26,7 @@
         "unsupported",
         "invalid_params",
         "not_found",
+        "ambiguous_target",
         "permission_denied",
         "timeout",
         "cdp_failed",

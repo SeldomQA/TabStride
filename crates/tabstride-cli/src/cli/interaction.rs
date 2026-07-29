@@ -125,7 +125,7 @@ impl LocatorFlags {
     }
 }
 
-fn build_locator(
+pub(crate) fn build_locator(
     positional: Option<String>,
     flags: &LocatorFlags,
     required: bool,

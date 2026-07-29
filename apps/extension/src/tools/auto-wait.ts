@@ -32,10 +32,7 @@ export async function waitForPageChange(
   if (options.signal?.aborted) return "cancelled";
 
   const maxWaitMs = Math.max(1, options.maxWaitMs);
-  const fallbackMs = Math.max(
-    1,
-    Math.min(options.fallbackMs ?? DEFAULT_FALLBACK_MS, maxWaitMs),
-  );
+  const fallbackMs = Math.max(1, Math.min(options.fallbackMs ?? DEFAULT_FALLBACK_MS, maxWaitMs));
   let eventSubscription: { dispose(): void } | undefined;
   let abortHandler: (() => void) | undefined;
 

@@ -1,18 +1,47 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "SelectParams",
+  "title": "AssertParams",
   "type": "object",
   "required": [
-    "session_id",
-    "target",
-    "values"
+    "session_id"
   ],
   "properties": {
+    "checked": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "disabled": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "enabled": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "hidden": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "session_id": {
       "type": "string"
     },
     "tab_id": {
-      "description": "Target tab. Defaults to the Agent Window's active tab.",
       "type": [
         "integer",
         "null"
@@ -20,25 +49,67 @@
       "format": "int64"
     },
     "target": {
-      "$ref": "#/definitions/Locator"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Locator"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "text_contains": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "text_equals": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "timeout_ms": {
-      "description": "Maximum time the daemon waits for the tool call before timing out.",
       "type": [
         "integer",
         "null"
       ],
       "format": "uint32",
-      "minimum": 1.0
+      "minimum": 0.0
     },
-    "values": {
-      "description": "Option `value` strings to set as the final selection. For a single-select `<select>` exactly one value is required; for `<select multiple>` the list replaces the current selection (an empty list clears all selections).",
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
+    "unchecked": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "url_equals": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "url_matches": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "value_equals": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "visible": {
+      "type": [
+        "boolean",
+        "null"
+      ]
     }
   },
+  "additionalProperties": false,
   "definitions": {
     "Locator": {
       "description": "Unified element locator used by CLI, Flow, and extension interaction tools. Exactly one primary strategy must be present. `role` additionally requires `name`; `exact` applies to semantic string strategies only.",

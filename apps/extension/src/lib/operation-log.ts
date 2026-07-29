@@ -53,6 +53,7 @@ export function summarizeOperation(method: string, params: unknown): string | un
     case "tool.click":
     case "tool.fill":
     case "tool.select":
+    case "tool.assert":
       return summarizeTarget(value.target);
     case "tool.press": {
       const key = safeText(value.key);

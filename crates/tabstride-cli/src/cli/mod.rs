@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+pub mod assertions;
 pub mod browser_wait;
 pub mod browsers;
 pub mod business_rpc;
@@ -31,6 +32,7 @@ pub mod waits;
 
 use clap::{Args, Parser, Subcommand};
 
+use crate::cli::assertions::AssertArgs;
 use crate::cli::client::ClientArgs;
 use crate::cli::console::ConsoleArgs;
 use crate::cli::daemon::{DaemonCmd, ServeArgs};
@@ -163,6 +165,9 @@ pub enum Command {
 
     /// Set option values on exactly one located `<select>`.
     Select(SelectArgs),
+
+    /// Retry a browser assertion until it passes or reaches its timeout.
+    Assert(AssertArgs),
 
     /// Evaluate a JavaScript expression inside the Agent Window.
     Evaluate(EvaluateArgs),

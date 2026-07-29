@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CdpRunner } from "../shared";
 import { waitForPageChange } from "../auto-wait";
+import type { CdpRunner } from "../shared";
 
 describe("waitForPageChange", () => {
   it("uses a page MutationObserver as the primary wake-up", async () => {
@@ -63,9 +63,9 @@ describe("waitForPageChange", () => {
     }) as unknown as CdpRunner["send"];
     const started = performance.now();
 
-    await expect(
-      waitForPageChange({ send }, 7, { maxWaitMs: 20, fallbackMs: 5 }),
-    ).resolves.toBe("fallback");
+    await expect(waitForPageChange({ send }, 7, { maxWaitMs: 20, fallbackMs: 5 })).resolves.toBe(
+      "fallback",
+    );
     expect(performance.now() - started).toBeGreaterThanOrEqual(4);
   });
 });

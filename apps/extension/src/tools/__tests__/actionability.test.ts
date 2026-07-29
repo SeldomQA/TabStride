@@ -224,20 +224,13 @@ describe("Actionability Engine v1", () => {
       }
     }) as unknown as CdpRunner["send"];
 
-    const result = await waitForActionable(
-      { send },
-      ctx,
-      4,
-      { css: "#delayed" },
-      "fill",
-      {
-        timeoutMs: 100,
-        waitForChange: async () => {
-          waits += 1;
-          return "mutation";
-        },
+    const result = await waitForActionable({ send }, ctx, 4, { css: "#delayed" }, "fill", {
+      timeoutMs: 100,
+      waitForChange: async () => {
+        waits += 1;
+        return "mutation";
       },
-    );
+    });
 
     if ("code" in result) throw new Error(JSON.stringify(result));
     expect(result.backendNodeId).toBe(101);
@@ -268,10 +261,7 @@ describe("Actionability Engine v1", () => {
         case "Runtime.callFunctionOn":
           return {
             result: {
-              value:
-                inspectedBackend === 99
-                  ? { ...readyState, enabled: false }
-                  : readyState,
+              value: inspectedBackend === 99 ? { ...readyState, enabled: false } : readyState,
             },
           };
         default:
@@ -317,14 +307,10 @@ describe("Actionability Engine v1", () => {
       timeoutMs: 100,
       waitForChange: wake,
     });
-    const clickMoving = await waitForActionable(
-      moving.cdp,
-      ctx,
-      4,
-      { css: "#moving" },
-      "click",
-      { timeoutMs: 100, waitForChange: wake },
-    );
+    const clickMoving = await waitForActionable(moving.cdp, ctx, 4, { css: "#moving" }, "click", {
+      timeoutMs: 100,
+      waitForChange: wake,
+    });
     const clickObscured = await waitForActionable(
       obscured.cdp,
       ctx,

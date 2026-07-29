@@ -9,8 +9,8 @@
 import type { SessionContext } from "@/session-manager/manager";
 import type { Locator, RpcError } from "@/transport/types";
 import { type AutoWaitWakeReason, waitForPageChange } from "./auto-wait";
-import { rpcError } from "./errors";
 import { scrollNodeIntoView } from "./element-geometry";
+import { rpcError } from "./errors";
 import { type ResolvedLocator, resolveLocator } from "./locator";
 import { type CdpRunner, isRpcError } from "./shared";
 
@@ -292,8 +292,7 @@ function locatorWaitError(
   startedAt: number,
   lastError: RpcError,
 ): RpcError {
-  const reason =
-    lastError.data?.reason === "ref_not_found" ? "ref_not_found" : "locator_not_found";
+  const reason = lastError.data?.reason === "ref_not_found" ? "ref_not_found" : "locator_not_found";
   return rpcError("timeout", reason, `${action} target did not appear before timeout`, {
     failed_check: "attached",
     elapsed_ms: elapsed(startedAt),

@@ -1,0 +1,545 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FlowRunParams",
+  "type": "object",
+  "required": [
+    "flow",
+    "session_id"
+  ],
+  "properties": {
+    "flow": {
+      "$ref": "#/definitions/FlowDefinition"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "variables": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "AssertionSpec": {
+      "type": "object",
+      "properties": {
+        "checked": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "disabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hidden": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "tab_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Locator"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text_contains": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text_equals": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "unchecked": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "url_equals": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url_matches": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value_equals": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visible": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowAssertEntry": {
+      "type": "object",
+      "required": [
+        "assert"
+      ],
+      "properties": {
+        "assert": {
+          "$ref": "#/definitions/AssertionSpec"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowClickEntry": {
+      "type": "object",
+      "required": [
+        "click"
+      ],
+      "properties": {
+        "click": {
+          "$ref": "#/definitions/FlowClickStep"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowClickStep": {
+      "type": "object",
+      "required": [
+        "target"
+      ],
+      "properties": {
+        "tab_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "target": {
+          "$ref": "#/definitions/Locator"
+        },
+        "timeout_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowDefinition": {
+      "type": "object",
+      "required": [
+        "name",
+        "steps"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FlowStep"
+          }
+        },
+        "timeout": {
+          "description": "Total timeout. Accepts `250ms`, `30s`, `2m`, or an integer number of ms.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowFillEntry": {
+      "type": "object",
+      "required": [
+        "fill"
+      ],
+      "properties": {
+        "fill": {
+          "$ref": "#/definitions/FlowFillStep"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowFillStep": {
+      "type": "object",
+      "required": [
+        "target",
+        "value"
+      ],
+      "properties": {
+        "clear_before": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "tab_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "target": {
+          "$ref": "#/definitions/Locator"
+        },
+        "timeout_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowNavigateEntry": {
+      "type": "object",
+      "required": [
+        "navigate"
+      ],
+      "properties": {
+        "navigate": {
+          "$ref": "#/definitions/FlowNavigateStep"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowNavigateStep": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "tab_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "timeout_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "url": {
+          "type": "string"
+        },
+        "wait_until": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WaitUntil"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowPressEntry": {
+      "type": "object",
+      "required": [
+        "press"
+      ],
+      "properties": {
+        "press": {
+          "$ref": "#/definitions/FlowPressStep"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowPressStep": {
+      "type": "object",
+      "required": [
+        "key"
+      ],
+      "properties": {
+        "hold_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "key": {
+          "type": "string"
+        },
+        "modifiers": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/KeyModifier"
+          }
+        },
+        "tab_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Locator"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timeout_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowSnapshotEntry": {
+      "type": "object",
+      "required": [
+        "snapshot"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/definitions/FlowSnapshotStep"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowSnapshotStep": {
+      "type": "object",
+      "properties": {
+        "max_depth": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "max_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "tab_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowStep": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FlowNavigateEntry"
+        },
+        {
+          "$ref": "#/definitions/FlowClickEntry"
+        },
+        {
+          "$ref": "#/definitions/FlowFillEntry"
+        },
+        {
+          "$ref": "#/definitions/FlowPressEntry"
+        },
+        {
+          "$ref": "#/definitions/FlowAssertEntry"
+        },
+        {
+          "$ref": "#/definitions/FlowSnapshotEntry"
+        },
+        {
+          "$ref": "#/definitions/FlowWaitMsEntry"
+        }
+      ]
+    },
+    "FlowWaitMsEntry": {
+      "type": "object",
+      "required": [
+        "wait_ms"
+      ],
+      "properties": {
+        "wait_ms": {
+          "$ref": "#/definitions/FlowWaitMsStep"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowWaitMsStep": {
+      "type": "object",
+      "required": [
+        "duration_ms"
+      ],
+      "properties": {
+        "duration_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "KeyModifier": {
+      "description": "Keyboard modifier flags. Multiple flags may be combined; the extension folds them into CDP's bitfield (`alt=1, ctrl=2, meta=4, shift=8`).",
+      "type": "string",
+      "enum": [
+        "alt",
+        "ctrl",
+        "meta",
+        "shift"
+      ]
+    },
+    "Locator": {
+      "description": "Unified element locator used by CLI, Flow, and extension interaction tools. Exactly one primary strategy must be present. `role` additionally requires `name`; `exact` applies to semantic string strategies only.",
+      "type": "object",
+      "properties": {
+        "css": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exact": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "placeholder": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "testId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "WaitUntil": {
+      "description": "Page-lifecycle checkpoint a navigation should wait on.\n\nMapping to CDP `Page.lifecycleEvent` names: * `Load` → `load` * `DomContentLoaded` → `DOMContentLoaded` * `NetworkIdle` → `networkIdle` * `Commit` → `commit` (earliest event after the navigation actually commits to a new document)",
+      "type": "string",
+      "enum": [
+        "load",
+        "domcontentloaded",
+        "networkidle",
+        "commit"
+      ]
+    }
+  }
+}

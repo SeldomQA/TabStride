@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::tools::{KeyModifier, Locator, WaitUntil};
+use crate::tools::{AssertionSpec, KeyModifier, Locator, WaitUntil};
 use crate::{ErrorCode, RpcError};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -29,6 +29,7 @@ pub enum FlowStep {
     Click(FlowClickEntry),
     Fill(FlowFillEntry),
     Press(FlowPressEntry),
+    Assert(FlowAssertEntry),
     Snapshot(FlowSnapshotEntry),
     WaitMs(FlowWaitMsEntry),
 }
@@ -49,6 +50,13 @@ flow_entry!(FlowFillEntry, fill, FlowFillStep);
 flow_entry!(FlowPressEntry, press, FlowPressStep);
 flow_entry!(FlowSnapshotEntry, snapshot, FlowSnapshotStep);
 flow_entry!(FlowWaitMsEntry, wait_ms, FlowWaitMsStep);
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FlowAssertEntry {
+    #[serde(rename = "assert")]
+    pub assertion: AssertionSpec,
+}
 
 pub type FlowTarget = Locator;
 
@@ -163,10 +171,17 @@ impl FlowDefinition {
             return Err(invalid("flow must contain at least one step"));
         }
         for (index, step) in self.steps.iter().enumerate() {
+            if let FlowStep::Assert(entry) = step {
+                entry
+                    .assertion
+                    .validate()
+                    .map_err(|message| invalid(format!("step {}: {message}", index + 1)))?;
+            }
             let target = match step {
                 FlowStep::Click(entry) => Some(&entry.click.target),
                 FlowStep::Fill(entry) => Some(&entry.fill.target),
                 FlowStep::Press(entry) => entry.press.target.as_ref(),
+                FlowStep::Assert(_) => None,
                 _ => None,
             };
             if let Some(target) = target {
@@ -208,11 +223,16 @@ steps:
         role: textbox
         name: Task
         exact: true
+  - assert:
+      target:
+        text: Write code
+        exact: true
+      visible: true
   - snapshot: {}
 "#,
         )
         .unwrap();
-        assert_eq!(flow.steps.len(), 4);
+        assert_eq!(flow.steps.len(), 5);
         flow.validate().unwrap();
         let FlowStep::Press(entry) = &flow.steps[2] else {
             panic!("expected press step");
@@ -221,6 +241,29 @@ steps:
             entry.press.target.as_ref().unwrap().role.as_deref(),
             Some("textbox")
         );
+        let FlowStep::Assert(entry) = &flow.steps[3] else {
+            panic!("expected assert step");
+        };
+        assert_eq!(entry.assertion.visible, Some(true));
+        assert_eq!(
+            entry.assertion.target.as_ref().unwrap().text.as_deref(),
+            Some("Write code")
+        );
+    }
+
+    #[test]
+    fn assertion_step_rejects_multiple_expectations() {
+        let flow: FlowDefinition = serde_yaml::from_str(
+            r##"name: invalid assertion
+steps:
+  - assert:
+      target: { css: "#save" }
+      visible: true
+      enabled: true
+"##,
+        )
+        .unwrap();
+        assert!(flow.validate().is_err());
     }
 
     #[test]

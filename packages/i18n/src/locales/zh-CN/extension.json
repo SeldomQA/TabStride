@@ -67,6 +67,7 @@
       "fill": "填写输入框",
       "press": "按下按键",
       "select": "选择选项",
+      "assert": "断言",
       "evaluate": "执行脚本",
       "wait_for_navigation": "等待页面",
       "request_help": "请求人工协助",

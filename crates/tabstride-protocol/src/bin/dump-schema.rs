@@ -77,6 +77,9 @@ fn main() {
     dump!(PressResult, "tool_press_result");
     dump!(SelectParams, "tool_select_params");
     dump!(SelectResult, "tool_select_result");
+    dump!(AssertionSpec, "assertion_spec");
+    dump!(AssertParams, "tool_assert_params");
+    dump!(AssertResult, "tool_assert_result");
     dump!(Locator, "locator");
 
     dump!(SnapshotParams, "tool_snapshot_params");

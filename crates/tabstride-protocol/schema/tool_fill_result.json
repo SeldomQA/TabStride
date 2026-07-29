@@ -4,6 +4,7 @@
   "type": "object",
   "required": [
     "tab_id",
+    "used_target",
     "value_length"
   ],
   "properties": {
@@ -28,6 +29,9 @@
         "string",
         "null"
       ]
+    },
+    "used_target": {
+      "$ref": "#/definitions/Locator"
     },
     "value_length": {
       "description": "UTF-16 code-unit length of the value that was finally typed (matches what `input.value.length` would report in the page).",
@@ -104,6 +108,67 @@
         "prompt",
         "beforeunload"
       ]
+    },
+    "Locator": {
+      "description": "Unified element locator used by CLI, Flow, and extension interaction tools. Exactly one primary strategy must be present. `role` additionally requires `name`; `exact` applies to semantic string strategies only.",
+      "type": "object",
+      "properties": {
+        "css": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exact": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "placeholder": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "testId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

@@ -4,6 +4,7 @@
   "type": "object",
   "required": [
     "session_id",
+    "target",
     "value"
   ],
   "properties": {
@@ -11,18 +12,6 @@
       "description": "Clear the field before typing. Defaults to `true`; pass `false` to append instead of replacing.",
       "type": [
         "boolean",
-        "null"
-      ]
-    },
-    "ref": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "selector": {
-      "type": [
-        "string",
         "null"
       ]
     },
@@ -36,6 +25,9 @@
       ],
       "format": "int64"
     },
+    "target": {
+      "$ref": "#/definitions/Locator"
+    },
     "timeout_ms": {
       "type": [
         "integer",
@@ -46,6 +38,69 @@
     },
     "value": {
       "type": "string"
+    }
+  },
+  "definitions": {
+    "Locator": {
+      "description": "Unified element locator used by CLI, Flow, and extension interaction tools. Exactly one primary strategy must be present. `role` additionally requires `name`; `exact` applies to semantic string strategies only.",
+      "type": "object",
+      "properties": {
+        "css": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exact": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "placeholder": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "testId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

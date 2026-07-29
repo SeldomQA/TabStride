@@ -62,6 +62,7 @@ export function ControlOverlay({
     "tool.fill": t("controlOverlay.operations.fill"),
     "tool.press": t("controlOverlay.operations.press"),
     "tool.select": t("controlOverlay.operations.select"),
+    "tool.assert": t("controlOverlay.operations.assert"),
     "tool.evaluate": t("controlOverlay.operations.evaluate"),
     "tool.wait_for_navigation": t("controlOverlay.operations.wait_for_navigation"),
     "tool.request_help": t("controlOverlay.operations.request_help"),
