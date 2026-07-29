@@ -1,0 +1,14 @@
+name: actionability-flow-consistency
+timeout: 10s
+
+steps:
+  - click:
+      target:
+        test_id: consistency-target
+      timeout_ms: 3000
+
+  - assert:
+      target:
+        test_id: consistency-result
+      text_equals: "1"
+      timeout_ms: 3000

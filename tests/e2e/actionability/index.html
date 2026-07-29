@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TabStride Actionability E2E</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: system-ui, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px;
+        background: #f8fafc;
+        color: #172033;
+      }
+
+      main {
+        width: min(880px, 100%);
+        margin: 0 auto;
+      }
+
+      section {
+        position: relative;
+        min-height: 92px;
+        margin: 16px 0;
+        padding: 18px;
+        border: 1px solid #dbe3ef;
+        border-radius: 12px;
+        background: white;
+      }
+
+      button,
+      input,
+      select {
+        min-height: 36px;
+        margin: 4px;
+      }
+
+      [data-result] {
+        display: inline-block;
+        min-width: 80px;
+        margin-left: 12px;
+        color: #12633b;
+      }
+
+      #moving-lane {
+        position: relative;
+        height: 48px;
+      }
+
+      @keyframes cross-lane {
+        from {
+          transform: translateX(0);
+        }
+        to {
+          transform: translateX(420px);
+        }
+      }
+
+      .moving {
+        animation: cross-lane 420ms linear;
+      }
+
+      #obscured-wrap {
+        position: relative;
+        width: 240px;
+        height: 52px;
+      }
+
+      #obscurer {
+        position: absolute;
+        inset: 0;
+        z-index: 5;
+        display: grid;
+        place-items: center;
+        background: rgb(15 23 42 / 92%);
+        color: white;
+      }
+
+      .duplicate {
+        margin-right: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>TabStride Actionability E2E</h1>
+      <p>Deterministic states for real Chrome, extension, daemon, CLI, and Flow testing.</p>
+
+      <section>
+        <h2>Delayed appearance</h2>
+        <button data-testid="start-delayed">Start delayed appearance</button>
+        <span data-testid="delayed-result" data-result>idle</span>
+        <div id="delayed-slot"></div>
+      </section>
+
+      <section>
+        <h2>Disabled to enabled</h2>
+        <button data-testid="start-enabled">Start enable timer</button>
+        <button data-testid="enabled-target" disabled>Enabled target</button>
+        <span data-testid="enabled-result" data-result>idle</span>
+      </section>
+
+      <section>
+        <h2>Moving target</h2>
+        <button data-testid="start-moving">Start movement</button>
+        <span data-testid="moving-result" data-result>idle</span>
+        <div id="moving-lane">
+          <button data-testid="moving-target">Moving target</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Obscured target</h2>
+        <button data-testid="start-obscured">Start obscurer</button>
+        <span data-testid="obscured-result" data-result>idle</span>
+        <div id="obscured-wrap">
+          <button data-testid="obscured-target">Obscured target</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>DOM rebuild</h2>
+        <button data-testid="start-rebuild">Start DOM rebuild</button>
+        <span data-testid="rebuild-result" data-result>idle</span>
+        <div id="rebuild-slot">
+          <button data-testid="rebuild-target" disabled>Rebuild target</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Strict matching and timeout</h2>
+        <button class="duplicate">Duplicate target</button>
+        <button class="duplicate">Duplicate target</button>
+        <button data-testid="never-enabled" disabled>Never enabled</button>
+      </section>
+
+      <section>
+        <h2>User interrupt</h2>
+        <button data-testid="interrupt-target" disabled>Interrupt target</button>
+      </section>
+
+      <section>
+        <h2>Attach scope</h2>
+        <button data-testid="scope-target">Leased tab only</button>
+        <span data-testid="scope-result" data-result>idle</span>
+      </section>
+
+      <section>
+        <h2>CLI and Flow consistency</h2>
+        <button data-testid="reset-consistency">Reset consistency</button>
+        <button data-testid="consistency-target" disabled>Consistency target</button>
+        <span data-testid="consistency-result" data-result>0</span>
+      </section>
+
+      <section>
+        <h2>Hot path benchmark</h2>
+        <button data-testid="hot-target">Hot target</button>
+        <span data-testid="hot-result" data-result>0</span>
+      </section>
+    </main>
+
+    <script>
+      const byTestId = (id) => document.querySelector(`[data-testid="${id}"]`);
+      const setResult = (id, value) => {
+        byTestId(id).textContent = value;
+      };
+
+      byTestId("start-delayed").addEventListener("click", () => {
+        document.querySelector("#delayed-slot").replaceChildren();
+        setResult("delayed-result", "waiting");
+        setTimeout(() => {
+          const target = document.createElement("button");
+          target.dataset.testid = "delayed-target";
+          target.textContent = "Delayed target";
+          target.addEventListener("click", () => setResult("delayed-result", "clicked"));
+          document.querySelector("#delayed-slot").append(target);
+        }, 350);
+      });
+
+      byTestId("start-enabled").addEventListener("click", () => {
+        const target = byTestId("enabled-target");
+        target.disabled = true;
+        setResult("enabled-result", "waiting");
+        setTimeout(() => {
+          target.disabled = false;
+        }, 350);
+      });
+      byTestId("enabled-target").addEventListener("click", () =>
+        setResult("enabled-result", "clicked"),
+      );
+
+      byTestId("start-moving").addEventListener("click", () => {
+        const target = byTestId("moving-target");
+        setResult("moving-result", "moving");
+        target.classList.remove("moving");
+        void target.offsetWidth;
+        target.classList.add("moving");
+      });
+      byTestId("moving-target").addEventListener("click", () => setResult("moving-result", "clicked"));
+
+      byTestId("start-obscured").addEventListener("click", () => {
+        document.querySelector("#obscurer")?.remove();
+        setResult("obscured-result", "obscured");
+        const obscurer = document.createElement("div");
+        obscurer.id = "obscurer";
+        obscurer.textContent = "temporary cover";
+        document.querySelector("#obscured-wrap").append(obscurer);
+        setTimeout(() => obscurer.remove(), 350);
+      });
+      byTestId("obscured-target").addEventListener("click", () =>
+        setResult("obscured-result", "clicked"),
+      );
+
+      const installRebuildTarget = (disabled) => {
+        const target = document.createElement("button");
+        target.dataset.testid = "rebuild-target";
+        target.disabled = disabled;
+        target.textContent = disabled ? "Old target" : "Rebuilt target";
+        target.addEventListener("click", () => setResult("rebuild-result", "clicked"));
+        document.querySelector("#rebuild-slot").replaceChildren(target);
+      };
+      byTestId("start-rebuild").addEventListener("click", () => {
+        setResult("rebuild-result", "waiting");
+        installRebuildTarget(true);
+        setTimeout(() => installRebuildTarget(false), 350);
+      });
+
+      byTestId("scope-target").addEventListener("click", () => setResult("scope-result", "clicked"));
+
+      let consistencyCount = 0;
+      byTestId("reset-consistency").addEventListener("click", () => {
+        consistencyCount = 0;
+        setResult("consistency-result", "0");
+        const target = byTestId("consistency-target");
+        target.disabled = true;
+        setTimeout(() => {
+          target.disabled = false;
+        }, 300);
+      });
+      byTestId("consistency-target").addEventListener("click", () => {
+        consistencyCount += 1;
+        setResult("consistency-result", String(consistencyCount));
+      });
+
+      let hotCount = 0;
+      byTestId("hot-target").addEventListener("click", () => {
+        hotCount += 1;
+        setResult("hot-result", String(hotCount));
+      });
+    </script>
+  </body>
+</html>

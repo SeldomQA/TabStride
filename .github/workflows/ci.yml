@@ -82,3 +82,31 @@ jobs:
 
       - name: Run script tests
         run: node --test scripts/*.test.mjs
+
+  chrome-e2e:
+    name: Real Chrome E2E
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - id: chrome
+        name: Install Chrome for Testing
+        uses: browser-actions/setup-chrome@v2
+
+      - name: Run real Chrome Actionability suite
+        run: pnpm e2e:chrome
+        env:
+          TABSTRIDE_CHROME: ${{ steps.chrome.outputs.chrome-path }}

@@ -1,0 +1,14 @@
+name: actionability-flow-hot-path
+timeout: 10s
+
+steps:
+  - click:
+      target:
+        test_id: hot-target
+      timeout_ms: 3000
+
+  - assert:
+      target:
+        test_id: hot-result
+      visible: true
+      timeout_ms: 3000

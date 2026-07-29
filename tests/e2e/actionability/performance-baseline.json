@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "threshold_percent": 15,
+  "minimum_samples": 20,
+  "scenarios": {
+    "cli_click_hot": {
+      "p95_ms": 130
+    },
+    "flow_click_assert_hot": {
+      "p95_ms": 120
+    }
+  }
+}
