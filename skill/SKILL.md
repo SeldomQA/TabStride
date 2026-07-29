@@ -35,6 +35,10 @@ Drive the user's **real Chromium browser** (with their logins and cookies) throu
 ## Mandatory workflow
 
 Every automation task **must** follow this lifecycle. Do **not** rely on idle timeouts (default session idle is 5 minutes).
+Before the first business command, decide whether the known work can run as a Flow. For any task
+with two or more known Flow-supported actions, Flow is the default execution path. If you choose
+individual commands instead, state the concrete dependency or unsupported operation that requires
+it.
 
 ```
 1. tabstride session start              → capture the 4-letter session id printed on stdout
@@ -53,27 +57,45 @@ Emergency cleanup: `tabstride session stop --all`.
 
 ## Persistent client
 
-When the harness can keep a child process alive, prefer `tabstride client` over spawning one CLI
-process per browser step. It accepts one protocol request per stdin line, writes one correlated
-response per stdout line, and keeps a single authenticated WebSocket connection to the running
-service. Pipeline requests only when their dependencies allow it; always preserve response IDs.
-Closing the client cancels its in-flight work and stops sessions it created, but still send an
-explicit `session.stop` in the normal success/error cleanup path.
+Use `tabstride client` for genuinely adaptive, non-Flow work when the harness can keep a child
+process alive. Do not choose it over a Flow for a deterministic sequence. It accepts one protocol
+request per stdin line, writes one correlated response per stdout line, and keeps a single
+authenticated WebSocket connection to the running service. Pipeline requests only when their
+dependencies allow it; always preserve response IDs. Closing the client cancels its in-flight work
+and stops sessions it created, but still send an explicit `session.stop` in the normal
+success/error cleanup path.
 
-## Flow batching
+## Flow-first execution
 
-When all steps are known before execution, prefer one validated Flow over separate CLI processes:
+Use one validated Flow instead of separate CLI processes when the task contains two or more known,
+Flow-supported actions and later steps do not depend on inspecting an unknown intermediate result:
 
 ```
 tabstride flow validate <flow.yaml>
 tabstride flow run <flow.yaml> --session <id> --var key=value
 ```
 
-Use Flow v1 only for deterministic `navigate`, `click`, `fill`, `press`, `assert`, `snapshot`, and `wait_ms`
-steps. Flow and individual commands use the same strict Locator and execution path. A flow stops on
-its first failure; do not rewrite or skip the failed step silently. Ctrl+C cancels the active step
-and the rest of the flow. Continue to use individual commands when the next action depends on
-inspecting the preceding result.
+`session start` and `session stop` are lifecycle commands, not Flow steps. For deterministic work,
+follow exactly: start one session → validate one Flow → run it once → stop the session.
+
+Use Flow v1 for deterministic `navigate`, `click`, `fill`, `press`, `assert`, `snapshot`, and
+`wait_ms` steps. Include assertions for the requested end state whenever Flow can express them.
+Flow and individual commands use the same strict Locator, Actionability, Auto Wait, cancellation,
+and timeout paths.
+
+If the initial page state is unknown, run one Snapshot, then build one Flow for all remaining known
+actions. Do not keep spawning one CLI process per action after the page is understood. Do not split
+a deterministic workflow merely to observe intermediate logs.
+
+Use individual commands only when the next action genuinely depends on an unknown preceding
+result, Flow does not support the required operation, or human intervention is required. When only
+part of a task is supported, batch each contiguous supported group into a Flow and run unsupported
+steps individually.
+
+A Flow stops on its first failure. Inspect its structured evidence and report or diagnose the
+failed step. Do not silently retry the whole Flow, skip or weaken a failed assertion, or replace the
+Flow with individual commands without first diagnosing why it failed. Ctrl+C cancels the active
+step and the rest of the Flow.
 
 ## Core interaction loop
 
