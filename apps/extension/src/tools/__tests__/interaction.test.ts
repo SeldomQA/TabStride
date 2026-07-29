@@ -123,6 +123,44 @@ describe("handleClick", () => {
     expect(fake.cdp.send).not.toHaveBeenCalled();
   });
 
+  it("keeps every Auto Wait retry inside the attached tab lease", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    sm.startAttached("aa11", 77, 9);
+    let queryCount = 0;
+    const fake = makeFakeCdp({
+      "DOM.getDocument": () => ({ root: { nodeId: 1 } }),
+      "DOM.querySelectorAll": () => {
+        queryCount += 1;
+        return { nodeIds: queryCount === 1 ? [] : [9] };
+      },
+      "DOM.describeNode": () => ({ node: { backendNodeId: 700 } }),
+      "DOM.scrollIntoViewIfNeeded": () => ({}),
+      "DOM.getContentQuads": () => ({ quads: [[0, 0, 20, 0, 20, 20, 0, 20]] }),
+      "Runtime.evaluate": (params: unknown) => {
+        const expression = String((params as { expression?: string })?.expression ?? "");
+        if (expression.includes("MutationObserver")) {
+          return { result: { value: "mutation" } };
+        }
+        return {
+          result: {
+            value: { overlayHostPresent: false, overlayHostConnected: false },
+          },
+        };
+      },
+      "Input.dispatchMouseEvent": () => ({}),
+    });
+
+    const result = await handleClick(
+      sm,
+      { session_id: "aa11", target: { css: "#late" }, timeout_ms: 100 },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+
+    if ("code" in result) throw new Error(JSON.stringify(result));
+    expect(queryCount).toBe(3);
+    expect(fake.sent.every((call) => call.tabId === 77)).toBe(true);
+  });
+
   it("rejects when neither ref nor selector is given", async () => {
     const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
     await sm.start("aa11");
@@ -150,30 +188,29 @@ describe("handleClick", () => {
     });
   });
 
-  it("returns not_found when ref doesn't resolve in the session", async () => {
+  it("waits until timeout when a ref doesn't resolve in the session", async () => {
     const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
     await sm.start("aa11");
     const fake = makeFakeCdp({});
     const res = await handleClick(
       sm,
-      { session_id: "aa11", target: { ref: "@e99" } },
+      { session_id: "aa11", target: { ref: "@e99" }, timeout_ms: 2 },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
-    expect(res).toMatchObject({ code: "not_found", data: { reason: "ref_not_found" } });
+    expect(res).toMatchObject({ code: "timeout", data: { reason: "ref_not_found" } });
   });
 
-  it("returns not_found when ref belongs to another tab", async () => {
+  it("waits until timeout when a ref belongs to another tab", async () => {
     const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
     const ctx = await sm.start("aa11");
     ctx.refStore.set("e3", 1234, { tabId: 4 });
     const fake = makeFakeCdp({});
     const res = await handleClick(
       sm,
-      { session_id: "aa11", target: { ref: "@e3" }, tab_id: 5 },
+      { session_id: "aa11", target: { ref: "@e3" }, tab_id: 5, timeout_ms: 2 },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
-    expect(res).toMatchObject({ code: "not_found", data: { reason: "ref_not_found" } });
-    expect(fake.cdp.send).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ code: "timeout", data: { reason: "ref_not_found" } });
   });
 
   it("clicks by ref, computes the quad centre, dispatches three mouse events", async () => {
@@ -439,7 +476,7 @@ describe("handleClick", () => {
     expect(fallback?.params).toMatchObject({ objectId: "obj-1" });
   });
 
-  it("returns not_found when DOM.querySelector returns nodeId=0", async () => {
+  it("waits until timeout when a CSS Locator remains empty", async () => {
     const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
     await sm.start("aa11");
     const fake = makeFakeCdp({
@@ -448,10 +485,10 @@ describe("handleClick", () => {
     });
     const res = await handleClick(
       sm,
-      { session_id: "aa11", target: { css: ".missing" } },
+      { session_id: "aa11", target: { css: ".missing" }, timeout_ms: 2 },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
-    expect(res).toMatchObject({ code: "not_found", data: { reason: "locator_not_found" } });
+    expect(res).toMatchObject({ code: "timeout", data: { reason: "locator_not_found" } });
   });
 
   it("respects the AbortSignal", async () => {
@@ -495,17 +532,16 @@ describe("handleClick", () => {
 });
 
 describe("handleFill", () => {
-  it("returns not_found for unknown ref", async () => {
+  it("waits until timeout for an unknown fill ref", async () => {
     const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
     await sm.start("aa11");
     const fake = makeFakeCdp({});
     const res = await handleFill(
       sm,
-      { session_id: "aa11", target: { ref: "e99" }, value: "hello" },
+      { session_id: "aa11", target: { ref: "e99" }, value: "hello", timeout_ms: 2 },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
-    expect(res).toMatchObject({ code: "not_found", data: { reason: "ref_not_found" } });
-    expect(fake.cdp.send).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ code: "timeout", data: { reason: "ref_not_found" } });
   });
 
   it("rejects non-fillable elements as invalid_params", async () => {
@@ -732,17 +768,16 @@ function expectPressOk(res: PressResult | RpcError): asserts res is PressResult 
 }
 
 describe("handlePress", () => {
-  it("returns not_found for unknown ref", async () => {
+  it("waits until timeout for an unknown press ref", async () => {
     const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
     await sm.start("aa11");
     const fake = makeFakeCdp({});
     const res = await handlePress(
       sm,
-      { session_id: "aa11", target: { ref: "@e99" }, key: "Enter" },
+      { session_id: "aa11", target: { ref: "@e99" }, key: "Enter", timeout_ms: 2 },
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
-    expect(res).toMatchObject({ code: "not_found", data: { reason: "ref_not_found" } });
-    expect(fake.cdp.send).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ code: "timeout", data: { reason: "ref_not_found" } });
   });
 
   it("dispatches rawKeyDown + char + keyUp for a printable letter", async () => {

@@ -90,8 +90,9 @@ tabstride snapshot --session <id>            → again after navigation / DOM ch
 
 Prefer `@eN` refs from the latest snapshot. When a stable ref is unavailable, pass exactly one
 semantic locator (`--role` + `--name`, `--label`, `--placeholder`, `--text`, or `--test-id`) or
-`--css`. Add `--exact` only to semantic locators. A locator must match exactly one element: handle
-`not_found` by re-snapshotting or correcting the target, and handle `ambiguous_target` by making the
+`--css`. Add `--exact` only to semantic locators. A locator must match exactly one element: zero
+matches automatically wait until the command deadline, then return `timeout` with
+`error.data.reason=locator_not_found` or `ref_not_found`; handle `ambiguous_target` by making the
 locator more specific. Never rely on the first match.
 
 ## Observation priority

@@ -1,13 +1,14 @@
 // Shared Actionability Engine v1 for click/fill/press/select.
 //
-// Locator resolution remains strict and independent: matching errors fail
-// immediately, while a uniquely matched node is re-resolved as actionability
-// state changes until the action deadline.
+// Locator resolution remains strict and independent: ambiguous matches fail
+// immediately, while zero matches and non-actionable nodes wait for page
+// changes and re-resolve until the action deadline.
 // Every successful attempt returns the freshly resolved backend node so the
 // caller never acts on a node captured before an actionability wait.
 
 import type { SessionContext } from "@/session-manager/manager";
 import type { Locator, RpcError } from "@/transport/types";
+import { type AutoWaitWakeReason, waitForPageChange } from "./auto-wait";
 import { rpcError } from "./errors";
 import { scrollNodeIntoView } from "./element-geometry";
 import { type ResolvedLocator, resolveLocator } from "./locator";
@@ -55,7 +56,10 @@ export interface ActionableTarget extends ResolvedLocator {
 export interface ActionabilityOptions {
   timeoutMs: number;
   signal?: AbortSignal;
+  /** Bounded fallback for geometry-only changes; DOM/CDP events wake sooner. */
   pollIntervalMs?: number;
+  /** Test seam; production always uses MutationObserver + CDP events. */
+  waitForChange?: (remainingMs: number) => Promise<AutoWaitWakeReason>;
 }
 
 interface InspectedState extends Omit<ActionabilityState, "stable"> {}
@@ -68,8 +72,6 @@ const REQUIRED_CHECKS: Record<ActionabilityAction, readonly ActionabilityCheck[]
   press: ["attached", "visible", "focusable"],
   select: ["attached", "visible", "enabled", "select"],
 };
-
-const TERMINAL_CHECKS = new Set<ActionabilityCheck>(["editable", "focusable", "select"]);
 
 export async function waitForActionable(
   cdp: CdpRunner,
@@ -84,9 +86,11 @@ export async function waitForActionable(
   const deadline = startedAt + timeoutMs;
   const pollIntervalMs = Math.max(1, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
   let previousRect: ActionabilityRect | undefined;
+  let previousBackendNodeId: number | undefined;
   let lastScrolledNodeId: number | undefined;
   let lastState: ActionabilityState | undefined;
   let lastFailedCheck: ActionabilityCheck = "attached";
+  let lastLocatorError: RpcError | undefined;
 
   while (true) {
     if (options.signal?.aborted) {
@@ -95,8 +99,15 @@ export async function waitForActionable(
 
     const resolved = await resolveLocator(cdp, ctx, tabId, locator);
     if (isRpcError(resolved)) {
-      return resolved;
+      if (resolved.code !== "not_found") return resolved;
+      lastLocatorError = resolved;
+      lastState = unavailableState();
+      lastFailedCheck = "attached";
+      previousRect = undefined;
+      previousBackendNodeId = undefined;
+      lastScrolledNodeId = undefined;
     } else {
+      lastLocatorError = undefined;
       // Scrolling is part of preparing an actionable element. Do it once per
       // freshly resolved backend node so a detached node cannot flood logs
       // during the wait loop.
@@ -109,9 +120,13 @@ export async function waitForActionable(
         lastState = unavailableState();
         lastFailedCheck = "attached";
       } else {
-        const stable = previousRect !== undefined && rectsEqual(previousRect, inspected.rect);
+        const stable =
+          previousBackendNodeId === resolved.backendNodeId &&
+          previousRect !== undefined &&
+          rectsEqual(previousRect, inspected.rect);
         lastState = { ...inspected, stable };
         previousRect = inspected.rect;
+        previousBackendNodeId = resolved.backendNodeId;
         const failed = firstFailedCheck(action, lastState);
         if (!failed) {
           return {
@@ -121,23 +136,32 @@ export async function waitForActionable(
           };
         }
         lastFailedCheck = failed;
-        if (TERMINAL_CHECKS.has(failed)) {
-          return actionabilityError(action, failed, startedAt, lastState, false);
-        }
       }
     }
 
     const remainingMs = deadline - performance.now();
     if (remainingMs <= 0) {
+      if (lastLocatorError) {
+        return locatorWaitError(action, locator, startedAt, lastLocatorError);
+      }
       return actionabilityError(
         action,
         lastFailedCheck,
         startedAt,
         lastState ?? unavailableState(),
-        true,
       );
     }
-    await abortableDelay(Math.min(pollIntervalMs, remainingMs), options.signal);
+    const waitMs = Math.min(pollIntervalMs, remainingMs);
+    const wakeReason = options.waitForChange
+      ? await options.waitForChange(waitMs)
+      : await waitForPageChange(cdp, tabId, {
+          maxWaitMs: waitMs,
+          fallbackMs: pollIntervalMs,
+          signal: options.signal,
+        });
+    if (wakeReason === "cancelled" || options.signal?.aborted) {
+      return { code: "cancelled", message: `${action} actionability wait aborted` };
+    }
   }
 }
 
@@ -248,19 +272,36 @@ function actionabilityError(
   failedCheck: ActionabilityCheck,
   startedAt: number,
   state: ActionabilityState,
-  timedOut: boolean,
 ): RpcError {
   const reason = reasonForCheck(failedCheck);
   return rpcError(
-    timedOut ? "timeout" : "invalid_params",
+    "timeout",
     reason,
-    `${action} target failed actionability check "${failedCheck}"${timedOut ? " before timeout" : ""}`,
+    `${action} target failed actionability check "${failedCheck}" before timeout`,
     {
       failed_check: failedCheck,
       elapsed_ms: elapsed(startedAt),
       last_state: state,
     },
   );
+}
+
+function locatorWaitError(
+  action: ActionabilityAction,
+  locator: Locator | undefined,
+  startedAt: number,
+  lastError: RpcError,
+): RpcError {
+  const reason =
+    lastError.data?.reason === "ref_not_found" ? "ref_not_found" : "locator_not_found";
+  return rpcError("timeout", reason, `${action} target did not appear before timeout`, {
+    failed_check: "attached",
+    elapsed_ms: elapsed(startedAt),
+    last_state: unavailableState(),
+    locator,
+    match_count: 0,
+    last_error: lastError,
+  });
 }
 
 function reasonForCheck(check: ActionabilityCheck) {
@@ -312,18 +353,6 @@ function rectsEqual(left: ActionabilityRect, right: ActionabilityRect | undefine
 
 function elapsed(startedAt: number): number {
   return Math.max(0, Math.round(performance.now() - startedAt));
-}
-
-function abortableDelay(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(done, ms);
-    signal?.addEventListener("abort", done, { once: true });
-    function done() {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", done);
-      resolve();
-    }
-  });
 }
 
 export const __testing__ = {

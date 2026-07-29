@@ -40,8 +40,8 @@ Flow v1 runs `navigate`, `click`, `fill`, `press`, `snapshot`, and `wait_ms` thr
 session queue. It stops at the first failure, reports per-step timings, and propagates timeout and
 cancel to the active child operation. Interaction targets share the same strict Locator in CLI and
 Flow: exactly one of `ref`, `css`, `role` + `name`, `label`, `placeholder`, `text`, or `testId`,
-with optional `exact` for semantic matching. Zero matches return `not_found`; multiple matches
-return `ambiguous_target`.
+with optional `exact` for semantic matching. Zero matches enter Auto Wait and eventually return a
+structured `timeout` if still absent; multiple matches return `ambiguous_target` immediately.
 
 All four interactions use the extension's shared Actionability Engine before dispatch. Click waits
 for visible/stable/enabled/unobscured state, fill requires editable, select requires an enabled

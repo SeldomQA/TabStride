@@ -312,11 +312,24 @@ pub fn info_for_error(code: ErrorCode, data: Option<&serde_json::Value>) -> Rend
             | reason::ELEMENT_NOT_VISIBLE
             | reason::ELEMENT_NOT_STABLE
             | reason::ELEMENT_DISABLED
-            | reason::ELEMENT_OBSCURED,
+            | reason::ELEMENT_NOT_EDITABLE
+            | reason::ELEMENT_OBSCURED
+            | reason::ELEMENT_NOT_FOCUSABLE
+            | reason::TARGET_NOT_SELECT,
         ) => RenderInfo {
             summary: "target did not become actionable before timeout",
             hint: Some(
                 "inspect error.data.failed_check and error.data.last_state; verify the element is visible, stable, enabled, and unobscured",
+            ),
+            exit_code: base.exit_code,
+        },
+        (
+            ErrorCode::Timeout,
+            reason::REF_NOT_FOUND | reason::SELECTOR_NOT_FOUND | reason::LOCATOR_NOT_FOUND,
+        ) => RenderInfo {
+            summary: "target did not appear before timeout",
+            hint: Some(
+                "verify the Locator and timeout; rerun snapshot if using a ref, or confirm the page creates the expected element",
             ),
             exit_code: base.exit_code,
         },
@@ -444,6 +457,19 @@ mod tests {
             "target did not become actionable before timeout"
         );
         assert!(info.hint.unwrap().contains("failed_check"));
+        assert_eq!(info.exit_code, 4);
+    }
+
+    #[test]
+    fn locator_auto_wait_timeout_has_locator_specific_copy() {
+        let data = serde_json::json!({
+            "reason": reason::LOCATOR_NOT_FOUND,
+            "failed_check": "attached",
+            "match_count": 0
+        });
+        let info = info_for_error(ErrorCode::Timeout, Some(&data));
+        assert_eq!(info.summary, "target did not appear before timeout");
+        assert!(info.hint.unwrap().contains("Locator"));
         assert_eq!(info.exit_code, 4);
     }
 
