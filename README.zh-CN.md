@@ -147,6 +147,9 @@ Attach 模式只控制一个明确指定的现有标签页：不会创建新窗�
 也不允许 `tab create`、`tab close`、`tab borrow`、`tab return` 等标签管理命令。停止 Session 时会
 解除浏览器控制并隐藏“Agent 正在控制”提示，但保留用户原有的标签页和窗口。即使执行过程中出错，也必须
 停止 Session。
+如果用户点击 Chrome 顶部“TabStride started debugging this browser”提示中的 **取消**，TabStride
+会将其视为用户明确撤销控制：当前命令以 `user_aborted` 结束、attach Session 被释放，Agent 必须立即
+停止。只有收到用户新的操作请求后才能重新创建 attach Session，禁止自动重试或重新接管。
 
 Chrome 插件弹窗始终提供可展开/折叠的“AI 操作日志”面板，并保留最近 100 条跨 Session 操作。
 Session 运行期间，页面底部控制条也提供相同的实时日志视图。日志显示执行中/成功/失败状态、安全的目标摘要

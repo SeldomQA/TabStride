@@ -168,6 +168,10 @@ Attach mode controls exactly one existing tab. It does not create a window, move
 sibling tabs, or permit tab-management commands such as `tab create`, `tab close`, `tab borrow`,
 and `tab return`. Stopping the session detaches browser control and removes the control overlay,
 while leaving the user's tab and window open. Always stop the session, including after errors.
+If the user clicks Chrome's **Cancel** button in the “TabStride started debugging this browser”
+banner, TabStride treats it as an explicit revocation: the current command ends with
+`user_aborted`, the attach session is released, and the agent must stop immediately. Start a new
+attach session only after a new user request; never retry or reattach automatically.
 
 The Chrome extension popup always includes a collapsible **AI operation logs** panel and keeps the
 latest 100 operations across sessions. While a session is active, the in-page control overlay also
