@@ -18,10 +18,10 @@ use tabstride::ipc_client::IpcClient;
 use tabstride_protocol::system::{HandshakeParams, HandshakeResult};
 use tabstride_protocol::tools::{
     AssertParams, AssertResult, AssertionSpec, ClickParams, ClickResult, FillParams, FillResult,
-    KeyModifier, Locator, MouseButton, NavigateBackParams, NavigateBackResult,
+    HelpOutcome, KeyModifier, Locator, MouseButton, NavigateBackParams, NavigateBackResult,
     NavigateForwardParams, NavigateForwardResult, NavigateParams, NavigateResult, PressParams,
-    PressResult, ReloadParams, ReloadResult, SelectParams, SelectResult, SessionStartParams,
-    SessionStartResult, WaitUntil,
+    PressResult, ReloadParams, ReloadResult, RequestHelpParams, RequestHelpResult, SelectParams,
+    SelectResult, SessionStartParams, SessionStartResult, WaitUntil,
 };
 use tabstride_protocol::{
     BrowserPeerInfo, ErrorCode, FlowDefinition, FlowRunParams, FlowRunResult, Frame, Method,
@@ -311,6 +311,125 @@ async fn five_step_flow_reuses_the_existing_tool_queue() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn complete_flow_runtime_runs_select_wait_help_and_final_assertion_in_order() {
+    let (handle, sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    let _ = do_handshake(&mut ws).await;
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen_by_extension = Arc::clone(&seen);
+    run_extension(ws, move |req| {
+        seen_by_extension
+            .lock()
+            .unwrap()
+            .push(req.method.as_str().to_string());
+        match req.method {
+            Method::ToolSelect => {
+                let params: SelectParams =
+                    serde_json::from_value(req.params.clone().unwrap()).unwrap();
+                assert_eq!(params.target.css.as_deref(), Some("#country"));
+                assert_eq!(params.values, ["SG"]);
+                ResponseBody::Ok(
+                    serde_json::to_value(SelectResult {
+                        tab_id: 17,
+                        used_target: params.target.clone(),
+                        used_ref: params.target.ref_.clone(),
+                        used_selector: params.target.css.clone(),
+                        multiple: false,
+                        selected_values: params.values,
+                        selected_labels: vec!["Singapore".into()],
+                        dialogs: vec![],
+                    })
+                    .unwrap(),
+                )
+            }
+            Method::ToolAssert => {
+                let params: AssertParams =
+                    serde_json::from_value(req.params.clone().unwrap()).unwrap();
+                let (assertion, expected) = if params.assertion.populated == Some(true) {
+                    ("populated", json!(true))
+                } else {
+                    assert_eq!(params.assertion.visible, Some(true));
+                    ("visible", json!(true))
+                };
+                ResponseBody::Ok(
+                    serde_json::to_value(AssertResult {
+                        tab_id: 17,
+                        assertion: assertion.into(),
+                        passed: true,
+                        elapsed_ms: 2,
+                        expected: expected.clone(),
+                        actual: expected,
+                        match_count: 1,
+                        used_target: params.assertion.target,
+                    })
+                    .unwrap(),
+                )
+            }
+            Method::ToolRequestHelp => {
+                let params: RequestHelpParams =
+                    serde_json::from_value(req.params.clone().unwrap()).unwrap();
+                assert_eq!(params.prompt, "Complete the confirmation");
+                ResponseBody::Ok(
+                    serde_json::to_value(RequestHelpResult {
+                        outcome: HelpOutcome::Continued,
+                        note: None,
+                        tab_id: 17,
+                        resolved_targets: None,
+                    })
+                    .unwrap(),
+                )
+            }
+            _ => panic!("unexpected flow method: {:?}", req.method),
+        }
+    });
+
+    let session_id = ipc_session_start(&sock).await;
+    let flow: FlowDefinition = serde_yaml::from_str(
+        r##"name: complete-runtime
+timeout: 2m
+steps:
+  - select:
+      target: { css: "#country" }
+      values: [SG]
+  - wait_for:
+      target: { css: "#name" }
+      state: populated
+  - request_help:
+      prompt: Complete the confirmation
+      targets:
+        - selector: "#confirmation"
+assertions:
+  - target: { css: "#done" }
+    visible: true
+"##,
+    )
+    .unwrap();
+    let result: FlowRunResult = ipc_tool_call(
+        &sock,
+        Method::FlowRun,
+        FlowRunParams {
+            session_id,
+            flow,
+            variables: std::collections::BTreeMap::new(),
+        },
+    )
+    .await
+    .expect("complete flow runtime ok");
+
+    assert_eq!(result.completed_steps.len(), 4);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [
+            "tool.select",
+            "tool.assert",
+            "tool.request_help",
+            "tool.assert"
+        ]
+    );
+    handle.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn individual_cli_rpc_and_flow_share_the_same_locator_wire_shape() {
     let (handle, sock) = spawn_daemon().await;
     let mut ws = connect_ext(handle.ws_addr()).await;
@@ -430,20 +549,9 @@ async fn individual_assertion_and_flow_share_the_same_executor_payload() {
             exact: Some(true),
             ..Locator::default()
         }),
-        tab_id: None,
         visible: Some(true),
-        hidden: None,
-        text_equals: None,
-        text_contains: None,
-        value_equals: None,
-        enabled: None,
-        disabled: None,
-        checked: None,
-        unchecked: None,
-        count: None,
-        url_equals: None,
-        url_matches: None,
         timeout_ms: Some(5_000),
+        ..AssertionSpec::default()
     };
     let direct: AssertResult = ipc_tool_call(
         &sock,

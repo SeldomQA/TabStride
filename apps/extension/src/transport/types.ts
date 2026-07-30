@@ -501,14 +501,18 @@ export interface AssertionSpec {
   tab_id?: number;
   visible?: boolean;
   hidden?: boolean;
+  attached?: boolean;
+  detached?: boolean;
   text_equals?: string;
   text_contains?: string;
   value_equals?: string;
   enabled?: boolean;
   disabled?: boolean;
+  editable?: boolean;
   checked?: boolean;
   unchecked?: boolean;
   count?: number;
+  populated?: boolean;
   url_equals?: string;
   url_matches?: string;
   timeout_ms?: number;

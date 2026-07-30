@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::Locator;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AssertionSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -16,6 +16,10 @@ pub struct AssertionSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hidden: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attached: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detached: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_equals: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_contains: Option<String>,
@@ -26,11 +30,15 @@ pub struct AssertionSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editable: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checked: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unchecked: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub populated: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url_equals: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -44,14 +52,18 @@ impl AssertionSpec {
         let predicates = [
             self.visible.is_some(),
             self.hidden.is_some(),
+            self.attached.is_some(),
+            self.detached.is_some(),
             self.text_equals.is_some(),
             self.text_contains.is_some(),
             self.value_equals.is_some(),
             self.enabled.is_some(),
             self.disabled.is_some(),
+            self.editable.is_some(),
             self.checked.is_some(),
             self.unchecked.is_some(),
             self.count.is_some(),
+            self.populated.is_some(),
             self.url_equals.is_some(),
             self.url_matches.is_some(),
         ]
@@ -115,18 +127,8 @@ mod tests {
             }),
             tab_id: None,
             visible: Some(true),
-            hidden: None,
-            text_equals: None,
-            text_contains: None,
-            value_equals: None,
-            enabled: None,
-            disabled: None,
-            checked: None,
-            unchecked: None,
-            count: None,
-            url_equals: None,
-            url_matches: None,
             timeout_ms: Some(1_000),
+            ..AssertionSpec::default()
         }
     }
 

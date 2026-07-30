@@ -28,14 +28,18 @@ const POLL_INTERVAL_MS = 50;
 const PREDICATES = [
   "visible",
   "hidden",
+  "attached",
+  "detached",
   "text_equals",
   "text_contains",
   "value_equals",
   "enabled",
   "disabled",
+  "editable",
   "checked",
   "unchecked",
   "count",
+  "populated",
   "url_equals",
   "url_matches",
 ] as const;
@@ -48,6 +52,7 @@ interface ElementState {
   text: string;
   value: string | null;
   enabled: boolean;
+  editable: boolean;
   checked: boolean | null;
 }
 
@@ -226,17 +231,20 @@ async function evaluateAttempt(
     };
   }
 
-  if (name === "count") {
+  if (name === "count" || name === "detached") {
     const locatorStartedAt = performance.now();
     const counted = await countLocatorMatches(cdp, ctx, tabId, params.target);
     timing.locatorMs += performance.now() - locatorStartedAt;
-    const expected = params.count as number;
+    const expected = name === "count" ? (params.count as number) : (params.detached as boolean);
     if (isRpcError(counted)) {
       return { passed: false, actual: null, expected, matchCount: 0, retryError: counted };
     }
     return {
-      passed: counted.matchCount === expected,
-      actual: counted.matchCount,
+      passed:
+        name === "count"
+          ? counted.matchCount === expected
+          : (counted.matchCount === 0) === expected,
+      actual: name === "count" ? counted.matchCount : counted.matchCount === 0,
       expected,
       matchCount: counted.matchCount,
       usedTarget: counted.usedTarget,
@@ -284,6 +292,9 @@ async function evaluateAttempt(
   const expected = params[name];
   let actual: unknown;
   switch (name) {
+    case "attached":
+      actual = state.attached;
+      break;
     case "visible":
       actual = state.visible;
       break;
@@ -310,11 +321,17 @@ async function evaluateAttempt(
     case "disabled":
       actual = !state.enabled;
       break;
+    case "editable":
+      actual = state.editable;
+      break;
     case "checked":
       actual = state.checked;
       break;
     case "unchecked":
       actual = state.checked === null ? null : !state.checked;
+      break;
+    case "populated":
+      actual = state.value !== null && state.value.length > 0;
       break;
     default:
       actual = null;
@@ -375,6 +392,12 @@ async function inspectElement(
           const nativeDisabled = attached && 'disabled' in this && this.disabled === true;
           const disabledFieldset = attached && this.closest('fieldset:disabled') !== null;
           const enabled = !!(attached && !ariaDisabled && !nativeDisabled && !disabledFieldset);
+          const readOnly = attached && 'readOnly' in this && this.readOnly === true;
+          const editable = !!(enabled && !readOnly && (
+            this instanceof HTMLInputElement ||
+            this instanceof HTMLTextAreaElement ||
+            this.isContentEditable
+          ));
           const text = String(this.innerText ?? this.textContent ?? '').replace(/\\s+/g, ' ').trim();
           const value = attached && 'value' in this ? String(this.value) : null;
           let checked = null;
@@ -383,7 +406,7 @@ async function inspectElement(
           } else if (attached && this.getAttribute('aria-checked') !== null) {
             checked = this.getAttribute('aria-checked') === 'true';
           }
-          return { attached, visible, text, value, enabled, checked };
+          return { attached, visible, text, value, enabled, editable, checked };
         }`,
         returnByValue: true,
       },

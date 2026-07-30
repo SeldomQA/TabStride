@@ -48,6 +48,7 @@ fn wait_flow(timeout: &str, durations: &[u64]) -> FlowRunParams {
                     })
                 })
                 .collect(),
+            assertions: vec![],
         },
         variables: BTreeMap::new(),
     }

@@ -7,6 +7,13 @@
     "steps"
   ],
   "properties": {
+    "assertions": {
+      "description": "Assertions that run only after every action step has succeeded.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/AssertionSpec"
+      }
+    },
     "name": {
       "type": "string"
     },
@@ -29,6 +36,12 @@
     "AssertionSpec": {
       "type": "object",
       "properties": {
+        "attached": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "checked": {
           "type": [
             "boolean",
@@ -43,7 +56,19 @@
           "format": "uint32",
           "minimum": 0.0
         },
+        "detached": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "disabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "editable": {
           "type": [
             "boolean",
             "null"
@@ -56,6 +81,12 @@
           ]
         },
         "hidden": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "populated": {
           "type": [
             "boolean",
             "null"
@@ -346,6 +377,106 @@
       },
       "additionalProperties": false
     },
+    "FlowRequestHelpEntry": {
+      "type": "object",
+      "required": [
+        "request_help"
+      ],
+      "properties": {
+        "request_help": {
+          "$ref": "#/definitions/FlowRequestHelpStep"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowRequestHelpStep": {
+      "type": "object",
+      "required": [
+        "prompt"
+      ],
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "tab_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "targets": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/HelpTarget"
+          }
+        },
+        "timeout_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowSelectEntry": {
+      "type": "object",
+      "required": [
+        "select"
+      ],
+      "properties": {
+        "select": {
+          "$ref": "#/definitions/FlowSelectStep"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowSelectStep": {
+      "type": "object",
+      "required": [
+        "target",
+        "values"
+      ],
+      "properties": {
+        "tab_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "target": {
+          "$ref": "#/definitions/Locator"
+        },
+        "timeout_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "FlowSnapshotEntry": {
       "type": "object",
       "required": [
@@ -402,6 +533,15 @@
           "$ref": "#/definitions/FlowPressEntry"
         },
         {
+          "$ref": "#/definitions/FlowSelectEntry"
+        },
+        {
+          "$ref": "#/definitions/FlowWaitForEntry"
+        },
+        {
+          "$ref": "#/definitions/FlowRequestHelpEntry"
+        },
+        {
           "$ref": "#/definitions/FlowAssertEntry"
         },
         {
@@ -411,6 +551,64 @@
           "$ref": "#/definitions/FlowWaitMsEntry"
         }
       ]
+    },
+    "FlowWaitForEntry": {
+      "type": "object",
+      "required": [
+        "wait_for"
+      ],
+      "properties": {
+        "wait_for": {
+          "$ref": "#/definitions/FlowWaitForStep"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlowWaitForState": {
+      "type": "string",
+      "enum": [
+        "attached",
+        "detached",
+        "visible",
+        "hidden",
+        "enabled",
+        "disabled",
+        "editable",
+        "checked",
+        "unchecked",
+        "populated"
+      ]
+    },
+    "FlowWaitForStep": {
+      "type": "object",
+      "required": [
+        "state",
+        "target"
+      ],
+      "properties": {
+        "state": {
+          "$ref": "#/definitions/FlowWaitForState"
+        },
+        "tab_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "target": {
+          "$ref": "#/definitions/Locator"
+        },
+        "timeout_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
     },
     "FlowWaitMsEntry": {
       "type": "object",
@@ -437,6 +635,24 @@
         }
       },
       "additionalProperties": false
+    },
+    "HelpTarget": {
+      "description": "One component the user is asked to look at / interact with. Exactly one of `ref` / `selector` should be supplied (mirrors the click/fill convention). When neither matches a live element the overlay still shows the prompt and reports the miss via [`ResolvedTarget`].",
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selector": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
     },
     "KeyModifier": {
       "description": "Keyboard modifier flags. Multiple flags may be combined; the extension folds them into CDP's bitfield (`alt=1, ctrl=2, meta=4, shift=8`).",

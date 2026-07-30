@@ -22,14 +22,18 @@ use crate::cli::navigate::parse_timeout_ms;
         .args([
             "visible",
             "hidden",
+            "attached",
+            "detached",
             "text_equals",
             "text_contains",
             "value_equals",
             "enabled",
             "disabled",
+            "editable",
             "checked",
             "unchecked",
             "count",
+            "populated",
             "url_equals",
             "url_matches",
         ])
@@ -56,6 +60,14 @@ pub struct AssertArgs {
     #[arg(long)]
     pub hidden: bool,
 
+    /// Assert that exactly one target is attached to the document.
+    #[arg(long)]
+    pub attached: bool,
+
+    /// Assert that no target is attached to the document.
+    #[arg(long)]
+    pub detached: bool,
+
     /// Assert normalized visible text equality.
     #[arg(long = "text-equals")]
     pub text_equals: Option<String>,
@@ -74,6 +86,10 @@ pub struct AssertArgs {
     #[arg(long)]
     pub disabled: bool,
 
+    /// Assert that the target accepts user input.
+    #[arg(long)]
+    pub editable: bool,
+
     #[arg(long)]
     pub checked: bool,
 
@@ -83,6 +99,10 @@ pub struct AssertArgs {
     /// Assert the number of locator matches. Count assertions are not strict.
     #[arg(long)]
     pub count: Option<u32>,
+
+    /// Assert that the target's form value is non-empty.
+    #[arg(long)]
+    pub populated: bool,
 
     #[arg(long = "url-equals")]
     pub url_equals: Option<String>,
@@ -104,14 +124,18 @@ pub fn dispatch(args: AssertArgs, format: Format) -> Result<(), CliError> {
         tab_id: args.tab_id,
         visible: args.visible.then_some(true),
         hidden: args.hidden.then_some(true),
+        attached: args.attached.then_some(true),
+        detached: args.detached.then_some(true),
         text_equals: args.text_equals,
         text_contains: args.text_contains,
         value_equals: args.value_equals,
         enabled: args.enabled.then_some(true),
         disabled: args.disabled.then_some(true),
+        editable: args.editable.then_some(true),
         checked: args.checked.then_some(true),
         unchecked: args.unchecked.then_some(true),
         count: args.count,
+        populated: args.populated.then_some(true),
         url_equals: args.url_equals,
         url_matches: args.url_matches,
         timeout_ms: Some(args.timeout),

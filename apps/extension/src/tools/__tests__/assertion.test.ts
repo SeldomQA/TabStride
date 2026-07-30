@@ -25,6 +25,7 @@ const ready = {
   text: "Write code",
   value: "done",
   enabled: true,
+  editable: true,
   checked: true,
 };
 
@@ -125,14 +126,35 @@ describe("Web-first Assertions v1", () => {
     ).resolves.toMatchObject({ passed: true, actual: 3, match_count: 3 });
   });
 
+  it("waits for detachment without requiring a strict match", async () => {
+    const sm = await manager();
+    const fake = cssCdp({ nodeCounts: [1, 0] });
+    await expect(
+      handleAssert(sm, params({ detached: true }), {
+        cdp: fake.cdp,
+        tabsApi: tabs(),
+        waitForChange: async () => "mutation",
+      }),
+    ).resolves.toMatchObject({
+      assertion: "detached",
+      passed: true,
+      actual: true,
+      match_count: 0,
+    });
+    expect(fake.counts.resolutions).toBe(2);
+  });
+
   it.each([
+    [{ attached: true }, "attached"],
     [{ text_equals: "Write   code" }, "text_equals"],
     [{ text_contains: "ite co" }, "text_contains"],
     [{ value_equals: "done" }, "value_equals"],
     [{ enabled: true }, "enabled"],
     [{ disabled: false }, "disabled"],
+    [{ editable: true }, "editable"],
     [{ checked: true }, "checked"],
     [{ unchecked: false }, "unchecked"],
+    [{ populated: true }, "populated"],
   ] as Array<[Partial<AssertParams>, string]>)("passes %s", async (expectation, name) => {
     const sm = await manager();
     await expect(

@@ -1,0 +1,37 @@
+name: complete-flow-runtime
+# Human steps may wait for input, so the Flow timeout must be longer than
+# every request_help timeout.
+timeout: 2m
+
+steps:
+  - select:
+      target:
+        label: Country
+      values: [SG]
+
+  # wait_for is Web-first: it observes page changes and re-resolves the
+  # original Locator until the requested state passes or times out.
+  - wait_for:
+      target:
+        label: Account name
+      state: populated
+      timeout_ms: 10000
+
+  - request_help:
+      title: Confirmation required
+      prompt: Complete the confirmation in the page, then choose Continue.
+      targets:
+        - selector: "#confirmation"
+      timeout_ms: 60000
+
+# These assertions run only after every step above succeeds.
+assertions:
+  - target:
+      role: status
+      name: Saved
+      exact: true
+    visible: true
+    timeout_ms: 10000
+
+  - url_matches: "/complete$"
+    timeout_ms: 10000

@@ -3,6 +3,12 @@
   "title": "AssertionSpec",
   "type": "object",
   "properties": {
+    "attached": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "checked": {
       "type": [
         "boolean",
@@ -17,7 +23,19 @@
       "format": "uint32",
       "minimum": 0.0
     },
+    "detached": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "disabled": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "editable": {
       "type": [
         "boolean",
         "null"
@@ -30,6 +48,12 @@
       ]
     },
     "hidden": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "populated": {
       "type": [
         "boolean",
         "null"

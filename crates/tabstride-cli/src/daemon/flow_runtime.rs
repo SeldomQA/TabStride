@@ -7,8 +7,9 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::Value;
 use tabstride_protocol::{
-    ErrorCode, FlowDefinition, FlowFailureData, FlowRunParams, FlowRunResult, FlowStep,
-    FlowStepResult, Method, ResponseBody, RpcError, RpcId,
+    ErrorCode, FlowAssertEntry, FlowDefinition, FlowFailureData, FlowRunParams, FlowRunResult,
+    FlowStep, FlowStepResult, HelpOutcome, Method, RequestHelpResult, ResponseBody, RpcError,
+    RpcId,
 };
 
 use super::state::DaemonState;
@@ -55,9 +56,15 @@ pub async fn handle_flow_run(
     let token = guard.token().clone();
     let started = Instant::now();
     let name = flow.name.clone();
-    let mut completed = Vec::with_capacity(flow.steps.len());
+    let mut steps = flow.steps;
+    steps.extend(
+        flow.assertions
+            .into_iter()
+            .map(|assertion| FlowStep::Assert(FlowAssertEntry { assertion })),
+    );
+    let mut completed = Vec::with_capacity(steps.len());
 
-    for (index, step) in flow.steps.into_iter().enumerate() {
+    for (index, step) in steps.into_iter().enumerate() {
         let method = step.method();
         let method_name = method.as_str().to_string();
         if token.is_cancelled() {
@@ -84,7 +91,7 @@ pub async fn handle_flow_run(
         let child_rpc_id = format!("{rpc_id}:step:{}", index + 1);
         let step_params = step.into_params(&params.session_id);
         let step_started = Instant::now();
-        let dispatch = dispatch_step(state, child_rpc_id.clone(), method, step_params);
+        let dispatch = dispatch_step(state, child_rpc_id.clone(), method.clone(), step_params);
         tokio::pin!(dispatch);
 
         let body = tokio::select! {
@@ -101,7 +108,7 @@ pub async fn handle_flow_run(
             }
         };
 
-        match body {
+        match normalize_step_body(&method, body) {
             ResponseBody::Ok(output) => completed.push(FlowStepResult {
                 index: index + 1,
                 method: method_name,
@@ -122,6 +129,43 @@ pub async fn handle_flow_run(
         })
         .unwrap_or(Value::Null),
     )
+}
+
+fn normalize_step_body(method: &Method, body: ResponseBody) -> ResponseBody {
+    if *method != Method::ToolRequestHelp {
+        return body;
+    }
+    let ResponseBody::Ok(output) = body else {
+        return body;
+    };
+    let result: RequestHelpResult = match serde_json::from_value(output.clone()) {
+        Ok(result) => result,
+        Err(error) => {
+            return ResponseBody::Err(RpcError {
+                code: ErrorCode::ProtocolError,
+                message: format!("request_help returned an invalid result: {error}"),
+                data: Some(output),
+            });
+        }
+    };
+    match result.outcome {
+        HelpOutcome::Continued => ResponseBody::Ok(output),
+        HelpOutcome::Cancelled => ResponseBody::Err(RpcError {
+            code: ErrorCode::UserAborted,
+            message: "user cancelled the Flow request_help step".into(),
+            data: Some(output),
+        }),
+        HelpOutcome::TimedOut => ResponseBody::Err(RpcError {
+            code: ErrorCode::Timeout,
+            message: "Flow request_help step timed out".into(),
+            data: Some(output),
+        }),
+        HelpOutcome::Navigated => ResponseBody::Err(RpcError {
+            code: ErrorCode::Cancelled,
+            message: "page navigated during the Flow request_help step".into(),
+            data: Some(output),
+        }),
+    }
 }
 
 async fn dispatch_step(
@@ -149,6 +193,9 @@ impl FlowStepExt for FlowStep {
             Self::Click(_) => Method::ToolClick,
             Self::Fill(_) => Method::ToolFill,
             Self::Press(_) => Method::ToolPress,
+            Self::Select(_) => Method::ToolSelect,
+            Self::WaitFor(_) => Method::ToolAssert,
+            Self::RequestHelp(_) => Method::ToolRequestHelp,
             Self::Assert(_) => Method::ToolAssert,
             Self::Snapshot(_) => Method::ToolSnapshot,
             Self::WaitMs(_) => Method::ToolWaitMs,
@@ -161,6 +208,9 @@ impl FlowStepExt for FlowStep {
             Self::Click(entry) => with_session(entry.click, session_id),
             Self::Fill(entry) => with_session(entry.fill, session_id),
             Self::Press(entry) => with_session(entry.press, session_id),
+            Self::Select(entry) => with_session(entry.select, session_id),
+            Self::WaitFor(entry) => with_session(entry.wait_for.into_assertion(), session_id),
+            Self::RequestHelp(entry) => with_session(entry.request_help, session_id),
             Self::Assert(entry) => with_session(entry.assertion, session_id),
             Self::Snapshot(entry) => with_session(entry.snapshot, session_id),
             Self::WaitMs(entry) => serde_json::to_value(entry.wait_ms).unwrap_or(Value::Null),
@@ -348,5 +398,54 @@ mod tests {
             parse_flow_timeout(Some("2m")).unwrap(),
             Duration::from_secs(120)
         );
+    }
+
+    fn help_result(outcome: HelpOutcome) -> ResponseBody {
+        ResponseBody::Ok(
+            serde_json::to_value(RequestHelpResult {
+                outcome,
+                note: None,
+                tab_id: 7,
+                resolved_targets: None,
+            })
+            .unwrap(),
+        )
+    }
+
+    #[test]
+    fn request_help_continue_allows_the_flow_to_resume() {
+        let body = normalize_step_body(
+            &Method::ToolRequestHelp,
+            help_result(HelpOutcome::Continued),
+        );
+        assert!(matches!(body, ResponseBody::Ok(_)));
+    }
+
+    #[test]
+    fn request_help_non_continue_outcomes_stop_the_flow() {
+        for (outcome, code) in [
+            (HelpOutcome::Cancelled, ErrorCode::UserAborted),
+            (HelpOutcome::TimedOut, ErrorCode::Timeout),
+            (HelpOutcome::Navigated, ErrorCode::Cancelled),
+        ] {
+            let body = normalize_step_body(&Method::ToolRequestHelp, help_result(outcome));
+            let ResponseBody::Err(error) = body else {
+                panic!("expected request_help outcome {outcome:?} to stop the flow");
+            };
+            assert_eq!(error.code, code);
+            assert!(error.data.is_some());
+        }
+    }
+
+    #[test]
+    fn malformed_request_help_result_is_a_protocol_error() {
+        let body = normalize_step_body(
+            &Method::ToolRequestHelp,
+            ResponseBody::Ok(serde_json::json!({"outcome": "continued"})),
+        );
+        let ResponseBody::Err(error) = body else {
+            panic!("expected malformed result to fail");
+        };
+        assert_eq!(error.code, ErrorCode::ProtocolError);
     }
 }

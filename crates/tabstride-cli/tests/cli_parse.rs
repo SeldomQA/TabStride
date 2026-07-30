@@ -104,6 +104,20 @@ fn parses_web_first_assertions() {
     assert!(args.locator.exact);
     assert_eq!(args.timeout, 5_000);
 
+    let cli = parse(&[
+        "tabstride",
+        "assert",
+        "--session",
+        "abcd",
+        "--css",
+        "#result",
+        "--detached",
+    ]);
+    let Command::Assert(args) = cli.command else {
+        panic!("expected assert command");
+    };
+    assert!(args.detached);
+
     assert!(
         Cli::try_parse_from([
             "tabstride",

@@ -78,19 +78,31 @@ tabstride flow run <flow.yaml> --session <id> --var key=value
 `session start` and `session stop` are lifecycle commands, not Flow steps. For deterministic work,
 follow exactly: start one session → validate one Flow → run it once → stop the session.
 
-Use Flow v1 for deterministic `navigate`, `click`, `fill`, `press`, `assert`, `snapshot`, and
-`wait_ms` steps. Include assertions for the requested end state whenever Flow can express them.
-Flow and individual commands use the same strict Locator, Actionability, Auto Wait, cancellation,
-and timeout paths.
+Use Flow v1 for deterministic `navigate`, `click`, `fill`, `press`, `select`, `wait_for`,
+`request_help`, `assert`, `snapshot`, and `wait_ms` steps. Flow and individual commands use the
+same strict Locator, Actionability, Auto Wait, cancellation, timeout, and Evidence paths.
+
+Prefer `wait_for` over `wait_ms` for page readiness. It re-resolves the original Locator and waits
+for `attached`, `detached`, `visible`, `hidden`, `enabled`, `disabled`, `editable`, `checked`,
+`unchecked`, or `populated`. Use `wait_ms` only when the task requires a real minimum delay rather
+than a page state.
+
+Put requested end-state checks in top-level `assertions`; they run only after every action step
+succeeds. Use an inline `assert` only when its result must gate a later action.
+
+Use `request_help` inside a Flow for a captcha, login, confirmation, or another bounded human step.
+Set the Flow's total `timeout` longer than the human step's `timeout_ms`. Continue resumes the Flow;
+Cancel, timeout, or navigation stops it and must be treated as a failed/aborted Flow, never as
+permission to continue browser operations.
 
 If the initial page state is unknown, run one Snapshot, then build one Flow for all remaining known
 actions. Do not keep spawning one CLI process per action after the page is understood. Do not split
 a deterministic workflow merely to observe intermediate logs.
 
 Use individual commands only when the next action genuinely depends on an unknown preceding
-result, Flow does not support the required operation, or human intervention is required. When only
-part of a task is supported, batch each contiguous supported group into a Flow and run unsupported
-steps individually.
+result or Flow does not support the required operation. Human intervention alone is not a reason
+to split the run when `request_help` can express it. When only part of a task is supported, batch
+each contiguous supported group into a Flow and run unsupported steps individually.
 
 A Flow stops on its first failure. Inspect its structured evidence and report or diagnose the
 failed step. Do not silently retry the whole Flow, skip or weaken a failed assertion, or replace the
