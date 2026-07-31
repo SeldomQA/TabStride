@@ -5,6 +5,7 @@ use std::time::Duration;
 use clap::Parser;
 use tabstride::cli::daemon::{DaemonCmd, parse_duration};
 use tabstride::cli::flow::FlowCmd;
+use tabstride::cli::metrics::MetricsCmd;
 use tabstride::cli::navigate::NavigateCmd;
 use tabstride::cli::session::{CliSessionMode, CliTabTarget, SessionSub};
 use tabstride::daemon::DaemonConfig;
@@ -80,6 +81,32 @@ fn parses_flow_validate_and_run() {
     };
     assert_eq!(args.session, "abcd");
     assert_eq!(args.variables, vec![("task".into(), "write-code".into())]);
+}
+
+#[test]
+fn parses_timing_and_metrics_commands() {
+    let cli = parse(&[
+        "tabstride",
+        "flow",
+        "run",
+        "demo.yaml",
+        "--session",
+        "abcd",
+        "--timing",
+    ]);
+    assert!(cli.flags.timing);
+    assert!(matches!(cli.command, Command::Flow(FlowCmd::Run(_))));
+
+    let cli = parse(&["tabstride", "metrics", "summary", "--method", "tool.click"]);
+    assert!(matches!(
+        cli.command,
+        Command::Metrics(MetricsCmd::Summary(_))
+    ));
+    let cli = parse(&["tabstride", "metrics", "export", "--out", "metrics.json"]);
+    assert!(matches!(
+        cli.command,
+        Command::Metrics(MetricsCmd::Export(_))
+    ));
 }
 
 #[test]

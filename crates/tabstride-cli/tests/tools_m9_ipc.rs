@@ -102,6 +102,7 @@ async fn do_handshake(ws: &mut Ws) -> HandshakeResult {
         id: "hs".into(),
         method: Method::SystemHandshake,
         params: Some(serde_json::to_value(params).unwrap()),
+        timing: None,
     };
     ws.send(Message::Text(serde_json::to_string(&req).unwrap()))
         .await
@@ -551,6 +552,7 @@ async fn wait_ms_cancellation_returns_cancelled_via_method_cancel() {
         id: "wait-cancel-1".into(),
         method: Method::ToolWaitMs,
         params: Some(serde_json::to_value(WaitMsParams { duration_ms: 5_000 }).unwrap()),
+        timing: None,
     });
     let mut line = serde_json::to_string(&wait_frame).unwrap();
     line.push('\n');

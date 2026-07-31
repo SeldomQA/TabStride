@@ -104,10 +104,15 @@ mod platform {
             params: &P,
             call_timeout: Duration,
         ) -> Result<RpcOutcome<R>> {
+            let mut params_value = serde_json::to_value(params).context("serialise params")?;
+            let timing = params_value
+                .as_object_mut()
+                .and_then(|map| map.remove(crate::timing::TIMING_FIELD));
             let frame = Frame::Request(RequestFrame {
                 id: id.clone(),
                 method,
-                params: Some(serde_json::to_value(params).context("serialise params")?),
+                params: Some(params_value),
+                timing,
             });
             let mut payload = serde_json::to_string(&frame).context("encode request")?;
             payload.push('\n');
@@ -267,10 +272,15 @@ mod platform {
             params: &P,
             call_timeout: Duration,
         ) -> Result<RpcOutcome<R>> {
+            let mut params_value = serde_json::to_value(params).context("serialise params")?;
+            let timing = params_value
+                .as_object_mut()
+                .and_then(|map| map.remove(crate::timing::TIMING_FIELD));
             let frame = Frame::Request(RequestFrame {
                 id: id.clone(),
                 method,
-                params: Some(serde_json::to_value(params).context("serialise params")?),
+                params: Some(params_value),
+                timing,
             });
             let mut payload = serde_json::to_string(&frame).context("encode request")?;
             payload.push('\n');

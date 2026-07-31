@@ -387,7 +387,7 @@ async function inspectElement(
           const style = attached ? this.ownerDocument.defaultView.getComputedStyle(this) : null;
           const visible = !!(attached && rect && rect.width > 0 && rect.height > 0 && style &&
             style.display !== 'none' && style.visibility !== 'hidden' &&
-            style.visibility !== 'collapse' && Number(style.opacity) > 0);
+            style.visibility !== 'collapse');
           const ariaDisabled = attached && this.getAttribute('aria-disabled') === 'true';
           const nativeDisabled = attached && 'disabled' in this && this.disabled === true;
           const disabledFieldset = attached && this.closest('fieldset:disabled') !== null;

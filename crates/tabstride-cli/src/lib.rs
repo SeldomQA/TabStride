@@ -4,6 +4,7 @@ pub mod agent_client;
 pub mod cli;
 pub mod daemon;
 pub mod ipc_client;
+pub mod timing;
 pub mod rpc_reason {
     pub const SESSION_BUSY: &str = "session_busy";
 }

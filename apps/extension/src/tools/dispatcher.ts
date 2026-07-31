@@ -23,6 +23,7 @@ import type {
   ScreenshotParams,
   SelectParams,
   SnapshotParams,
+  TimingTrace,
   WaitForNavigationParams,
 } from "@/transport/types";
 import { isRequestFrame } from "@/transport/types";
@@ -190,6 +191,9 @@ export class ToolDispatcher {
 
     const mutatesSessions =
       req.method === "tool.session_start" || req.method === "tool.session_stop";
+    const timing = requestTiming(req);
+    if (timing) timing.extension_received_at = epochMicroseconds();
+    const requestCdp = this.cdp && timing ? timedCdp(this.cdp, timing) : this.cdp;
     const operationStartedAtMs = Date.now();
     const operationSession = operationSessionId(req.params);
     const operationDetail = summarizeOperation(req.method, req.params);
@@ -208,7 +212,10 @@ export class ToolDispatcher {
     let body: ResponseFrame;
     let startedSession: string | null = null;
     try {
-      const result = await Promise.race([this.invoke(req, ac.signal), abortPromise(ac.signal)]);
+      const result = await Promise.race([
+        this.invoke(req, ac.signal, requestCdp),
+        abortPromise(ac.signal),
+      ]);
       if (isRpcError(result)) {
         body = { id: req.id, error: result };
       } else {
@@ -234,6 +241,10 @@ export class ToolDispatcher {
       }
     } finally {
       this.inflightAbortControllers.delete(req.id);
+    }
+    if (timing) {
+      timing.extension_replied_at = epochMicroseconds();
+      attachTiming(body, timing);
     }
     if (operationSession && req.method.startsWith("tool.")) {
       const error = "error" in body ? body.error : undefined;
@@ -294,13 +305,17 @@ export class ToolDispatcher {
     }
   }
 
-  private async invoke(req: RequestFrame, signal: AbortSignal): Promise<unknown | RpcError> {
+  private async invoke(
+    req: RequestFrame,
+    signal: AbortSignal,
+    cdp = this.cdp,
+  ): Promise<unknown | RpcError> {
     switch (req.method) {
       case "tool.session_start":
         return handleSessionStart(this.sessions, req.params as SessionStartParams);
       case "tool.session_stop":
         return handleSessionStop(this.sessions, req.params as SessionStopParams, {
-          cdp: this.cdp,
+          cdp,
         });
       case "tool.tab_list":
         return handleTabList(this.sessions, req.params as TabListParams);
@@ -321,60 +336,60 @@ export class ToolDispatcher {
         return handleScreenshot(
           this.sessions,
           req.params as ScreenshotParams,
-          this.cdp
-            ? { cdp: this.cdp, tabsApi: chromeTabsCaptureApi, captureApi: chromeTabsCaptureApi }
+          cdp
+            ? { cdp, tabsApi: chromeTabsCaptureApi, captureApi: chromeTabsCaptureApi }
             : undefined,
         );
       case "tool.console":
         return handleConsole(
           this.sessions,
           req.params as ConsoleParams,
-          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi } : undefined,
+          cdp ? { cdp, tabsApi: chromeTabsApi } : undefined,
         );
       case "tool.snapshot":
         return handleSnapshot(
           this.sessions,
           req.params as SnapshotParams,
-          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsCaptureApi } : undefined,
+          cdp ? { cdp, tabsApi: chromeTabsCaptureApi } : undefined,
         );
       case "tool.get_html":
         return handleGetHtml(
           this.sessions,
           req.params as GetHtmlParams,
-          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsCaptureApi } : undefined,
+          cdp ? { cdp, tabsApi: chromeTabsCaptureApi } : undefined,
         );
       case "tool.navigate":
         return handleNavigate(
           this.sessions,
           req.params as NavigateParams,
-          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
+          cdp ? { cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
       case "tool.navigate_back":
         return handleNavigateBack(
           this.sessions,
           req.params as NavigateBackParams,
-          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
+          cdp ? { cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
       case "tool.navigate_forward":
         return handleNavigateForward(
           this.sessions,
           req.params as NavigateForwardParams,
-          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
+          cdp ? { cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
       case "tool.reload":
         return handleReload(
           this.sessions,
           req.params as ReloadParams,
-          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
+          cdp ? { cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
       case "tool.click": {
         const params = req.params as ClickParams;
         const result = await handleClick(
           this.sessions,
           params,
-          this.cdp
+          cdp
             ? {
-                cdp: this.cdp,
+                cdp,
                 tabsApi: chromeTabsApi,
                 signal,
                 bypassOverlay: async (tabId, enabled) => {
@@ -390,55 +405,55 @@ export class ToolDispatcher {
               }
             : undefined,
         );
-        return this.withFailureEvidence(params, result, signal);
+        return this.withFailureEvidence(params, result, signal, cdp);
       }
       case "tool.fill": {
         const params = req.params as FillParams;
         const result = await handleFill(
           this.sessions,
           params,
-          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
+          cdp ? { cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
-        return this.withFailureEvidence(params, result, signal);
+        return this.withFailureEvidence(params, result, signal, cdp);
       }
       case "tool.press": {
         const params = req.params as PressParams;
         const result = await handlePress(
           this.sessions,
           params,
-          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
+          cdp ? { cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
-        return this.withFailureEvidence(params, result, signal);
+        return this.withFailureEvidence(params, result, signal, cdp);
       }
       case "tool.select": {
         const params = req.params as SelectParams;
         const result = await handleSelect(
           this.sessions,
           params,
-          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
+          cdp ? { cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
-        return this.withFailureEvidence(params, result, signal);
+        return this.withFailureEvidence(params, result, signal, cdp);
       }
       case "tool.assert": {
         const params = req.params as AssertParams;
         const result = await handleAssert(
           this.sessions,
           params,
-          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
+          cdp ? { cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
-        return this.withFailureEvidence(params, result, signal);
+        return this.withFailureEvidence(params, result, signal, cdp);
       }
       case "tool.evaluate":
         return handleEvaluate(
           this.sessions,
           req.params as EvaluateParams,
-          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
+          cdp ? { cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
       case "tool.wait_for_navigation":
         return handleWaitForNavigation(
           this.sessions,
           req.params as WaitForNavigationParams,
-          this.cdp ? { cdp: this.cdp, tabsApi: chromeTabsApi, signal } : undefined,
+          cdp ? { cdp, tabsApi: chromeTabsApi, signal } : undefined,
         );
       case "tool.request_help":
         return handleRequestHelp(this.sessions, req.params as RequestHelpParams, {
@@ -449,7 +464,7 @@ export class ToolDispatcher {
           },
           sendToTab: (tabId, msg) => chrome.tabs.sendMessage(tabId, msg),
           watchTabNavigation: defaultWatchTabNavigation,
-          ...(this.cdp ? { cdp: this.cdp } : {}),
+          ...(cdp ? { cdp } : {}),
           notifications: makeHelpNotifications(),
           notificationCopy: this.helpNotificationCopy?.(),
           signal,
@@ -466,14 +481,61 @@ export class ToolDispatcher {
     params: { session_id?: string; tab_id?: number; target?: ClickParams["target"] },
     result: T | RpcError,
     signal: AbortSignal,
+    cdp = this.cdp,
   ): Promise<T | RpcError> {
-    if (!this.cdp || !isRpcError(result)) return result;
+    if (!cdp || !isRpcError(result)) return result;
     return enrichFailureEvidence(this.sessions, params, result, {
-      cdp: this.cdp,
+      cdp,
       tabsApi: chromeTabsApi,
       signal,
     });
   }
+}
+
+const TIMING_FIELD = "__tabstride_timing";
+
+function requestTiming(req: RequestFrame): TimingTrace | null {
+  if (req.timing && typeof req.timing === "object") return req.timing;
+  const params = req.params;
+  if (!params || typeof params !== "object") return null;
+  const timing = (params as Record<string, unknown>)[TIMING_FIELD];
+  return timing && typeof timing === "object" ? (timing as TimingTrace) : null;
+}
+
+function attachTiming(frame: ResponseFrame, timing: TimingTrace): void {
+  if ("result" in frame && frame.result && typeof frame.result === "object") {
+    (frame.result as Record<string, unknown>)[TIMING_FIELD] = timing;
+    return;
+  }
+  if ("error" in frame) {
+    frame.error.data = { ...(frame.error.data ?? {}), [TIMING_FIELD]: timing };
+  }
+}
+
+function epochMicroseconds(): number {
+  if (typeof performance !== "undefined" && Number.isFinite(performance.timeOrigin)) {
+    return Math.round((performance.timeOrigin + performance.now()) * 1000);
+  }
+  return Date.now() * 1000;
+}
+
+function timedCdp<T extends CdpRunner>(cdp: T, timing: TimingTrace): T {
+  return new Proxy(cdp, {
+    get(target, property, receiver) {
+      if (property === "send") {
+        return async (...args: Parameters<CdpRunner["send"]>) => {
+          timing.cdp_started_at ??= epochMicroseconds();
+          try {
+            return await target.send(...args);
+          } finally {
+            timing.cdp_finished_at = epochMicroseconds();
+          }
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 function isRpcError(v: unknown): v is RpcError {

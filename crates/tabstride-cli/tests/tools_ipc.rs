@@ -89,6 +89,7 @@ async fn do_handshake(ws: &mut Ws) -> HandshakeResult {
         id: "hs".into(),
         method: Method::SystemHandshake,
         params: Some(serde_json::to_value(params).unwrap()),
+        timing: None,
     };
     ws.send(Message::Text(serde_json::to_string(&req).unwrap()))
         .await
@@ -385,6 +386,11 @@ async fn snapshot_returns_text_and_ref_count() {
                 tab_id: 13,
                 truncated: false,
                 dialogs: vec![],
+                snapshot_kind: Some("full".into()),
+                document_id: None,
+                document_version: None,
+                base_document_version: None,
+                removed_refs: vec![],
             })
             .unwrap(),
         )
@@ -399,6 +405,7 @@ async fn snapshot_returns_text_and_ref_count() {
             tab_id: None,
             max_depth: None,
             max_tokens: None,
+            incremental: false,
         },
     )
     .await
@@ -489,3 +496,4 @@ async fn tool_dispatch_rejects_unknown_session() {
     assert_eq!(err.code, ErrorCode::NotFound);
     handle.shutdown().await;
 }
+ 

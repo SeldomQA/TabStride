@@ -8,17 +8,51 @@
     "text"
   ],
   "properties": {
+    "base_document_version": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
     "dialogs": {
       "type": "array",
       "items": {
         "$ref": "#/definitions/JavaScriptDialogInfo"
       }
     },
+    "document_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_version": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
     "ref_count": {
       "description": "Number of `@e<N>` refs registered for this session by this snapshot. Equivalent to the size of the new ref-store map.",
       "type": "integer",
       "format": "uint32",
       "minimum": 0.0
+    },
+    "removed_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "snapshot_kind": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "tab_id": {
       "description": "Tab the snapshot was actually computed for (after resolving the optional `tab_id` default).",

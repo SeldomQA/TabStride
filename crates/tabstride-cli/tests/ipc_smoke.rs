@@ -15,6 +15,7 @@ fn make_request_line(id: &str, method: Method) -> String {
         id: id.into(),
         method,
         params: None,
+        timing: None,
     });
     let mut s = serde_json::to_string(&frame).unwrap();
     s.push('\n');

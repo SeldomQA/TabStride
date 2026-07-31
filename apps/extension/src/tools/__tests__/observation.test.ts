@@ -510,6 +510,9 @@ describe("overlay snapshot isolation", () => {
 describe("handleSnapshot", () => {
   function makeDeps(nodes: CdpAxNode[], overlayNode?: object) {
     const sendImpl = async (_tabId: number, method: string, _params?: object) => {
+      if (method === "Runtime.evaluate") {
+        return { result: { value: { id: "doc-1", version: 1 } } };
+      }
       if (method === "Accessibility.enable") return {};
       if (method === "Accessibility.getFullAXTree") return { nodes };
       if (method === "DOM.getDocument") return { root: { nodeId: 1 } };
@@ -587,6 +590,30 @@ describe("handleSnapshot", () => {
     await handleSnapshot(sm, { session_id: "aa11" }, deps);
     expect(ctx.refStore.resolve("e9")).toBeNull();
     expect(ctx.refStore.resolve("e1")).toBe(1);
+  });
+
+  it("reuses an unchanged document snapshot without another full AX request", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    await sm.start("aa11");
+    const deps = makeDeps([
+      {
+        nodeId: "1",
+        role: { type: "role", value: "RootWebArea" },
+        name: { type: "computedString", value: "Cached" },
+        backendDOMNodeId: 1,
+      },
+    ]);
+
+    const first = await handleSnapshot(sm, { session_id: "aa11" }, deps);
+    const second = await handleSnapshot(sm, { session_id: "aa11", incremental: true }, deps);
+    if ("code" in first || "code" in second) throw new Error("unexpected snapshot failure");
+
+    expect(first.snapshot_kind).toBe("full");
+    expect(second.snapshot_kind).toBe("cached");
+    expect(second.text).toBe("");
+    expect(
+      deps.send.mock.calls.filter((call) => call[1] === "Accessibility.getFullAXTree"),
+    ).toHaveLength(1);
   });
 
   it("excludes TabStride overlay controls from text and refs", async () => {

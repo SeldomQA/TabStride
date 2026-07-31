@@ -32,6 +32,7 @@ async fn connect_agent() -> (
             })
             .unwrap(),
         ),
+        timing: None,
     });
     socket
         .send(Message::Text(serde_json::to_string(&handshake).unwrap()))
@@ -70,6 +71,7 @@ async fn rejects_agent_with_wrong_capability_token() {
             })
             .unwrap(),
         ),
+        timing: None,
     });
     socket
         .send(Message::Text(serde_json::to_string(&request).unwrap()))
@@ -93,6 +95,7 @@ async fn one_connection_handles_one_hundred_pipelined_requests() {
             id: format!("ping-{index}"),
             method: Method::SystemPing,
             params: Some(serde_json::json!({})),
+            timing: None,
         });
         socket
             .send(Message::Text(serde_json::to_string(&request).unwrap()))
@@ -132,11 +135,13 @@ async fn cancel_can_overtake_a_long_running_request_on_same_connection() {
             id: "wait-long".into(),
             method: Method::ToolWaitMs,
             params: Some(serde_json::json!({ "duration_ms": 30_000 })),
+            timing: None,
         },
         RequestFrame {
             id: "cancel-wait".into(),
             method: Method::Cancel,
             params: Some(serde_json::json!({ "rpc_id": "wait-long" })),
+            timing: None,
         },
     ] {
         socket

@@ -19,7 +19,9 @@
 //! "kill the CLI process" behaviour for short status reads.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use serde::Serialize;
@@ -29,6 +31,23 @@ use tracing::debug;
 
 use crate::cli::error::CliError;
 use crate::ipc_client::IpcClient;
+use crate::timing::{TIMING_FIELD, TimingTrace, epoch_us, take_trace};
+
+static CLI_STARTED: OnceLock<Instant> = OnceLock::new();
+static TIMING_ENABLED: AtomicBool = AtomicBool::new(false);
+static DAEMON_CHECK_US: AtomicU64 = AtomicU64::new(0);
+
+pub fn mark_cli_started() {
+    let _ = CLI_STARTED.set(Instant::now());
+}
+
+pub fn set_timing_enabled(enabled: bool) {
+    TIMING_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+pub fn record_daemon_check(duration: Duration) {
+    DAEMON_CHECK_US.store(duration.as_micros() as u64, Ordering::Relaxed);
+}
 
 /// Hard cap on how long we wait for the cancelled RPC to settle after
 /// SIGINT triggers. Picked per design §4.6 ("≤ 2s, then force exit").
@@ -73,16 +92,46 @@ where
     P: Serialize + Send + 'static,
     R: DeserializeOwned + Send + 'static,
 {
+    let call_started = Instant::now();
+    let cli_startup_us = CLI_STARTED
+        .get()
+        .map(|started| started.elapsed().as_micros() as u64)
+        .unwrap_or_default();
+    let daemon_check_us = DAEMON_CHECK_US.swap(0, Ordering::Relaxed);
     let rpc_id: RpcId = format!("{}-{}", rpc_id_prefix, random_short_id());
+    let method_name = method.as_str();
+    let mut params_value = match params {
+        Some(params) => serde_json::to_value(params)
+            .context("serialise business RPC params")
+            .map_err(CliError::Local)?,
+        None => serde_json::json!({}),
+    };
+    if let Some(map) = params_value.as_object_mut() {
+        map.insert(
+            TIMING_FIELD.to_string(),
+            serde_json::to_value(TimingTrace {
+                agent_received_at: Some(epoch_us()),
+                ..TimingTrace::default()
+            })
+            .expect("TimingTrace is serialisable"),
+        );
+    }
+    let connect_started = Instant::now();
     let mut client = IpcClient::connect(&sock)
         .await
         .map_err(|error| CliError::Local(error.context("connect to TabStride service")))?;
+    let ipc_connect_us = connect_started.elapsed().as_micros() as u64;
     let rpc_id_for_call = rpc_id.clone();
     let rpc_id_for_cancel = rpc_id.clone();
 
     let main_fut = async move {
         client
-            .call_with_id::<P, R>(rpc_id_for_call, method, params, call_timeout)
+            .call_with_id::<serde_json::Value, serde_json::Value>(
+                rpc_id_for_call,
+                method,
+                Some(params_value),
+                call_timeout,
+            )
             .await
     };
     tokio::pin!(main_fut);
@@ -111,7 +160,73 @@ where
         }
     };
 
-    outcome.map_err(CliError::from_rpc)
+    match outcome {
+        Ok(mut raw) => {
+            let trace = take_trace(&mut raw);
+            if TIMING_ENABLED.load(Ordering::Relaxed) {
+                print_timing(
+                    method_name,
+                    trace.as_ref(),
+                    cli_startup_us,
+                    daemon_check_us,
+                    ipc_connect_us,
+                    call_started.elapsed().as_micros() as u64,
+                );
+            }
+            serde_json::from_value(raw)
+                .context("decode business RPC result")
+                .map_err(CliError::Local)
+        }
+        Err(mut error) => {
+            let trace = error.data.as_mut().and_then(take_trace);
+            if TIMING_ENABLED.load(Ordering::Relaxed) {
+                print_timing(
+                    method_name,
+                    trace.as_ref(),
+                    cli_startup_us,
+                    daemon_check_us,
+                    ipc_connect_us,
+                    call_started.elapsed().as_micros() as u64,
+                );
+            }
+            Err(CliError::from_rpc(error))
+        }
+    }
+}
+
+fn print_timing(
+    method: &str,
+    trace: Option<&TimingTrace>,
+    startup_us: u64,
+    daemon_check_us: u64,
+    ipc_connect_us: u64,
+    local_runtime_us: u64,
+) {
+    let value = |value: Option<u64>| {
+        value
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".into())
+    };
+    eprintln!("Timing {method}");
+    eprintln!("  cli_startup_us          {startup_us}");
+    eprintln!("  daemon_check_us         {daemon_check_us}");
+    eprintln!("  ipc_connect_us          {ipc_connect_us}");
+    if let Some(trace) = trace {
+        eprintln!("  queue_wait_us           {}", value(trace.queue_wait_us()));
+        eprintln!("  websocket_us            {}", value(trace.websocket_us()));
+        eprintln!(
+            "  extension_dispatch_us   {}",
+            value(trace.extension_dispatch_us())
+        );
+        eprintln!("  cdp_us                  {}", value(trace.cdp_us()));
+        eprintln!(
+            "  total_runtime_us        {}",
+            value(trace.total_runtime_us())
+        );
+    } else {
+        eprintln!("  full_chain              unavailable");
+    }
+    eprintln!("  cli_runtime_us          {local_runtime_us}");
 }
 
 /// Send a `cancel { rpc_id }` frame over a fresh connection so it

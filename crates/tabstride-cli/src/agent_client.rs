@@ -75,6 +75,7 @@ impl AgentClient {
             id: id.clone(),
             method,
             params: Some(serde_json::to_value(params).context("serialize agent params")?),
+            timing: None,
         });
         self.socket
             .send(Message::Text(serde_json::to_string(&frame)?))

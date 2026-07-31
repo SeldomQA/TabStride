@@ -17,6 +17,10 @@ pub struct RequestFrame {
     pub method: Method,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
+    /// Optional transport metadata. It is outside method params so strict
+    /// tool schemas remain stable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -140,6 +144,7 @@ impl<'de> Visitor<'de> for FrameVisitor {
         let mut id = None::<RpcId>;
         let mut method = None::<Method>;
         let mut params = None::<serde_json::Value>;
+        let mut timing = None::<serde_json::Value>;
         let mut result = None::<serde_json::Value>;
         let mut error = None::<RpcError>;
         let mut event = None::<EventKind>;
@@ -164,6 +169,12 @@ impl<'de> Visitor<'de> for FrameVisitor {
                         return Err(de::Error::duplicate_field("params"));
                     }
                     params = Some(map.next_value()?);
+                }
+                "timing" => {
+                    if timing.is_some() {
+                        return Err(de::Error::duplicate_field("timing"));
+                    }
+                    timing = Some(map.next_value()?);
                 }
                 "result" => {
                     if result.is_some() {
@@ -205,7 +216,12 @@ impl<'de> Visitor<'de> for FrameVisitor {
         if method.is_some() {
             let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
             let method = method.ok_or_else(|| de::Error::missing_field("method"))?;
-            return Ok(Frame::Request(RequestFrame { id, method, params }));
+            return Ok(Frame::Request(RequestFrame {
+                id,
+                method,
+                params,
+                timing,
+            }));
         }
 
         let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
@@ -229,6 +245,20 @@ impl<'de> Visitor<'de> for FrameVisitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_timing_is_transport_metadata_not_method_params() {
+        let frame = Frame::Request(RequestFrame {
+            id: "timed-1".into(),
+            method: Method::SystemPing,
+            params: Some(serde_json::json!({"value": 1})),
+            timing: Some(serde_json::json!({"agent_received_at": 42})),
+        });
+        let encoded = serde_json::to_value(&frame).unwrap();
+        assert_eq!(encoded["params"], serde_json::json!({"value": 1}));
+        assert_eq!(encoded["timing"]["agent_received_at"], 42);
+        assert_eq!(serde_json::from_value::<Frame>(encoded).unwrap(), frame);
+    }
 
     #[test]
     fn session_user_interrupt_serialises_as_snake_case() {

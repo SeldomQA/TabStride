@@ -93,6 +93,7 @@ async fn handshake_as_ext(
         id: "hs".into(),
         method: Method::SystemHandshake,
         params: Some(serde_json::to_value(params).unwrap()),
+        timing: None,
     };
     ws.send(Message::Text(serde_json::to_string(&req).unwrap()))
         .await
@@ -367,6 +368,7 @@ async fn connect_second_ext(
         id: "hs".into(),
         method: Method::SystemHandshake,
         params: Some(serde_json::to_value(params).unwrap()),
+        timing: None,
     };
     b.send(Message::Text(serde_json::to_string(&hs).unwrap()))
         .await

@@ -31,6 +31,10 @@ pub struct SnapshotArgs {
     /// Soft cap on rendered tokens (~4 chars/token).
     #[arg(long = "max-tokens")]
     pub max_tokens: Option<u32>,
+
+    /// Return only changes since the last compatible snapshot.
+    #[arg(long)]
+    pub incremental: bool,
 }
 
 pub fn dispatch(args: SnapshotArgs, format: Format) -> Result<(), CliError> {
@@ -44,6 +48,7 @@ fn run(sock: PathBuf, args: SnapshotArgs, format: Format) -> Result<(), CliError
         tab_id: args.tab_id,
         max_depth: args.max_depth,
         max_tokens: args.max_tokens,
+        incremental: args.incremental,
     };
     let reply: SnapshotResult = call(sock, params)?;
     match format {
@@ -54,9 +59,19 @@ fn run(sock: PathBuf, args: SnapshotArgs, format: Format) -> Result<(), CliError
         }
         Format::Human => {
             if reply.text.is_empty() {
-                println!("(empty snapshot — page may still be loading)");
+                if matches!(
+                    reply.snapshot_kind.as_deref(),
+                    Some("cached" | "incremental")
+                ) {
+                    println!("(no accessibility-tree changes)");
+                } else {
+                    println!("(empty snapshot — page may still be loading)");
+                }
             } else {
                 println!("{}", reply.text);
+            }
+            if !reply.removed_refs.is_empty() {
+                eprintln!("removed refs: {}", reply.removed_refs.join(", "));
             }
             if reply.truncated {
                 eprintln!(

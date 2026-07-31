@@ -46,6 +46,7 @@ use tracing::{debug, warn};
 use super::browsers::BrowserRegistry;
 use super::inflight::{PromoteOutcome, ToolInflightEntry};
 use super::sessions::{SessionId, SessionRegistry};
+use crate::timing::{epoch_us, put_trace, trace_from};
 
 /// Bounded queue capacity per session. Picked per design §5 ("tokio
 /// mpsc channel(64)"). A queue overflowing this many in-flight jobs
@@ -360,11 +361,14 @@ async fn dispatch_with_sender(
     state: Arc<Mutex<QueueState>>,
     session_id: SessionId,
     method: Method,
-    params: Value,
+    mut params: Value,
     timeout: Duration,
     wait_for_capacity: bool,
     inflight: Option<Arc<ToolInflightEntry>>,
 ) -> Result<Value, DispatchError> {
+    let mut timing = trace_from(&params);
+    timing.serve_queue_entered_at = Some(epoch_us());
+    put_trace(&mut params, &timing);
     let (respond_tx, respond_rx) = oneshot::channel();
     let job = ToolJob {
         method,
@@ -464,10 +468,19 @@ async fn forward_one(
         let mut pending = client.pending.lock().unwrap();
         pending.register(rpc_id.clone())
     };
+    let mut params = job.params.clone();
+    let mut timing = trace_from(&params);
+    timing.serve_queue_started_at = Some(epoch_us());
+    timing.extension_sent_at = Some(epoch_us());
+    put_trace(&mut params, &timing);
+    let wire_timing = params
+        .as_object_mut()
+        .and_then(|map| map.remove(crate::timing::TIMING_FIELD));
     let request = Frame::Request(RequestFrame {
         id: rpc_id.clone(),
         method: job.method.clone(),
-        params: Some(job.params.clone()),
+        params: Some(params),
+        timing: wire_timing,
     });
     // Promote the inflight entry to "forwarded" AND push the WS
     // request frame to the sink inside the same critical section

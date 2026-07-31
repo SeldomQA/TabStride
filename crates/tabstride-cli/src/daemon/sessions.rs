@@ -385,6 +385,7 @@ async fn rollback_extension_session(
             })
             .unwrap(),
         ),
+        timing: None,
     };
     if client.sink.send(Frame::Request(frame)).is_err() {
         client.pending.lock().unwrap().cancel(&rpc_id);
@@ -444,6 +445,7 @@ pub async fn start_session(
         id: rpc_id.clone(),
         method: tabstride_protocol::Method::ToolSessionStart,
         params: Some(serde_json::to_value(&params).unwrap()),
+        timing: None,
     };
     let waiter = {
         let mut pending = client.pending.lock().unwrap();

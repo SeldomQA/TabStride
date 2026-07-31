@@ -1,5 +1,6 @@
 // Unified strict Locator resolver shared by click/fill/press/select.
 
+import { readDocumentIdentity, sameDocument } from "@/session-manager/document-cache";
 import type { SessionContext } from "@/session-manager/manager";
 import type { Locator, RpcError } from "@/transport/types";
 import { rpcError } from "./errors";
@@ -84,10 +85,21 @@ export async function resolveLocator(
       matchCount: 1,
     };
   }
-  if (target.css) {
-    return resolveCss(cdp, tabId, target);
+  const document = await readDocumentIdentity(cdp, tabId);
+  const cacheKey = `resolve:${tabId}:${JSON.stringify(target)}`;
+  if (document) {
+    const cached = ctx.documentCache.locators.get(cacheKey);
+    if (cached && sameDocument(cached.document, document)) {
+      return cached.value as ResolvedLocator | RpcError;
+    }
   }
-  return resolveSemantic(cdp, tabId, target);
+  const result = target.css
+    ? await resolveCss(cdp, tabId, target)
+    : await resolveSemantic(cdp, tabId, target);
+  if (document && (!isRpcError(result) || result.code !== "cdp_failed")) {
+    ctx.documentCache.locators.set(cacheKey, { document, value: result });
+  }
+  return result;
 }
 
 /**

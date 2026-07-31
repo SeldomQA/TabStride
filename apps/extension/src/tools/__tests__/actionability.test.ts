@@ -27,7 +27,8 @@ const readyState: Omit<ActionabilityState, "stable"> = {
 function actionabilityCdp(states: Array<Omit<ActionabilityState, "stable">>) {
   let inspections = 0;
   let resolutions = 0;
-  const send = vi.fn(async (_tabId: number, method: string) => {
+  const functionDeclarations: string[] = [];
+  const send = vi.fn(async (_tabId: number, method: string, params?: object) => {
     switch (method) {
       case "DOM.getDocument":
         return { root: { nodeId: 1 } };
@@ -41,6 +42,9 @@ function actionabilityCdp(states: Array<Omit<ActionabilityState, "stable">>) {
       case "DOM.resolveNode":
         return { object: { objectId: `node-${resolutions}` } };
       case "Runtime.callFunctionOn": {
+        functionDeclarations.push(
+          (params as { functionDeclaration?: string } | undefined)?.functionDeclaration ?? "",
+        );
         const state = states[Math.min(inspections, states.length - 1)];
         inspections += 1;
         return { result: { value: state } };
@@ -51,6 +55,7 @@ function actionabilityCdp(states: Array<Omit<ActionabilityState, "stable">>) {
   }) as unknown as CdpRunner["send"];
   return {
     cdp: { send } satisfies CdpRunner,
+    functionDeclarations,
     counts: {
       get inspections() {
         return inspections;
@@ -90,6 +95,22 @@ describe("Actionability Engine v1", () => {
       "enabled",
       "select",
     ]);
+  });
+
+  it("treats opacity-zero controls with a rendered box as visible", async () => {
+    const ctx = await context();
+    const fake = actionabilityCdp([readyState, readyState]);
+
+    const result = await waitForActionable(fake.cdp, ctx, 4, { css: ".toggle" }, "click", {
+      timeoutMs: 200,
+      pollIntervalMs: 1,
+    });
+
+    expect(result).not.toHaveProperty("code");
+    expect(fake.functionDeclarations).not.toHaveLength(0);
+    expect(fake.functionDeclarations.every((declaration) => !declaration.includes("opacity"))).toBe(
+      true,
+    );
   });
 
   it("re-resolves a click target until its geometry is stable", async () => {

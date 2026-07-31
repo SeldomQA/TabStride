@@ -5,6 +5,7 @@ use std::time::Duration;
 use rand::Rng;
 use tabstride::daemon::{self, DaemonConfig};
 use tabstride::ipc_client::IpcClient;
+use tabstride::timing::TIMING_FIELD;
 use tabstride_protocol::{
     CancelParams, CancelResult, ErrorCode, FlowDefinition, FlowRunParams, FlowRunResult, FlowStep,
     FlowWaitMsEntry, FlowWaitMsStep, Method,
@@ -75,6 +76,32 @@ async fn flow_runs_all_steps_in_one_rpc() {
             .iter()
             .all(|step| step.method == "tool.wait_ms")
     );
+    daemon.shutdown().await;
+}
+
+#[tokio::test]
+async fn flow_transport_timing_does_not_pollute_strict_params() {
+    let (daemon, socket) = spawn_daemon().await;
+    let mut client = IpcClient::connect(&socket).await.unwrap();
+    let mut params = serde_json::to_value(wait_flow("1s", &[1])).unwrap();
+    params.as_object_mut().unwrap().insert(
+        TIMING_FIELD.into(),
+        serde_json::json!({ "transport_probe": true }),
+    );
+
+    let result: FlowRunResult = client
+        .call(
+            "timed-flow",
+            Method::FlowRun,
+            Some(params),
+            Duration::from_secs(2),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(result.completed_steps.len(), 1);
+    assert_eq!(result.completed_steps[0].method, "tool.wait_ms");
     daemon.shutdown().await;
 }
 

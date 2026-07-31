@@ -20,6 +20,7 @@ pub mod human_loop;
 pub mod install_skill;
 pub mod interaction;
 pub mod logs;
+pub mod metrics;
 pub mod navigate;
 pub mod render_error;
 pub mod screenshot;
@@ -69,6 +70,10 @@ pub struct GlobalFlags {
     /// Increase log verbosity (`-v` debug, `-vv` trace).
     #[arg(short = 'v', long = "verbose", global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
+
+    /// Print the end-to-end request timing breakdown to stderr.
+    #[arg(long, global = true)]
+    pub timing: bool,
 }
 
 /// Top-level `tabstride` CLI.
@@ -117,6 +122,10 @@ pub enum Command {
 
     /// Print (and optionally follow) the daemon log file.
     Logs(LogsCmd),
+
+    /// Inspect persisted request latency metrics.
+    #[command(subcommand)]
+    Metrics(metrics::MetricsCmd),
 
     /// Session lifecycle.
     Session(SessionCmd),

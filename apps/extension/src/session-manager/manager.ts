@@ -1,4 +1,5 @@
 import { AGENT_WINDOW_HOME, type AgentWindowApi, chromeAgentWindowApi } from "./agent-window";
+import { DocumentCache } from "./document-cache";
 import { RefStore } from "./ref-store";
 
 export interface SessionContext {
@@ -10,6 +11,7 @@ export interface SessionContext {
   /** The only leased tab for attach sessions. */
   attachedTabId?: number;
   refStore: RefStore;
+  documentCache: DocumentCache;
   borrowedTabs: Map<number, BorrowedTab>;
   createdAtMs: number;
 }
@@ -161,6 +163,7 @@ export class SessionManager {
       mode: "isolated",
       agentWindowId: windowId,
       refStore: new RefStore(),
+      documentCache: new DocumentCache(),
       borrowedTabs: new Map(),
       createdAtMs: this.now(),
     };
@@ -192,6 +195,7 @@ export class SessionManager {
       agentWindowId: windowId,
       attachedTabId: tabId,
       refStore: new RefStore(),
+      documentCache: new DocumentCache(),
       borrowedTabs: new Map(),
       createdAtMs: this.now(),
     };

@@ -58,6 +58,19 @@ export interface RequestFrame {
   id: RpcId;
   method: string;
   params?: unknown;
+  timing?: TimingTrace;
+}
+
+export interface TimingTrace {
+  agent_received_at?: number;
+  serve_queue_entered_at?: number;
+  serve_queue_started_at?: number;
+  extension_sent_at?: number;
+  extension_received_at?: number;
+  cdp_started_at?: number;
+  cdp_finished_at?: number;
+  extension_replied_at?: number;
+  serve_replied_at?: number;
 }
 
 export interface OkResponseFrame {
@@ -325,6 +338,7 @@ export interface SnapshotParams {
   tab_id?: number;
   max_depth?: number;
   max_tokens?: number;
+  incremental?: boolean;
 }
 
 export interface SnapshotResult {
@@ -333,6 +347,11 @@ export interface SnapshotResult {
   tab_id: number;
   truncated?: boolean;
   dialogs?: JavaScriptDialogInfo[];
+  snapshot_kind?: "full" | "cached" | "incremental";
+  document_id?: string;
+  document_version?: number;
+  base_document_version?: number;
+  removed_refs?: string[];
 }
 
 export interface GetHtmlParams {

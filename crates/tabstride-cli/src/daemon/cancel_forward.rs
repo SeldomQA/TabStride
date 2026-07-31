@@ -29,6 +29,7 @@ pub(super) fn forward_cancel_to_browser(
         id: cancel_id,
         method: Method::Cancel,
         params: Some(serde_json::json!({ "rpc_id": ws_rpc_id })),
+        timing: None,
     };
     client
         .sink

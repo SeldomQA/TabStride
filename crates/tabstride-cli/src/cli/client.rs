@@ -185,6 +185,7 @@ async fn run_websocket_stdio(client: AgentClient, call_timeout: Duration) -> Res
                         id: cancel_id,
                         method: tabstride_protocol::Method::Cancel,
                         params: Some(serde_json::json!({ "rpc_id": rpc_id })),
+                        timing: None,
                     });
                     writer.send(Message::Text(serde_json::to_string(&frame)?)).await
                         .context("send timed-out request cancellation")?;

@@ -5,6 +5,7 @@
 
 import { ChromiumCdp } from "@/browser-driver/chromium-cdp";
 import { TABSTRIDE_OVERLAY_HOST_SELECTOR } from "@/lib/overlay-dom";
+import { readDocumentIdentity, sameDocument } from "@/session-manager/document-cache";
 import type { SessionContext, SessionManager } from "@/session-manager/manager";
 import type {
   GetHtmlParams,
@@ -633,9 +634,72 @@ export async function handleSnapshot(
   if (isRpcError(target)) return target;
   const dialogCursor = markDialogCursor(deps.cdp, target.tabId);
 
-  const result = await captureFailureSnapshot(deps.cdp, ctx, target.tabId, params);
-  if (isRpcError(result)) return result;
-  return attachDialogs(deps.cdp, target.tabId, dialogCursor, result);
+  const document = await readDocumentIdentity(deps.cdp, target.tabId);
+  const cacheKey = `${target.tabId}:${params.max_depth ?? ""}:${params.max_tokens ?? ""}`;
+  const cached = ctx.documentCache.snapshots.get(cacheKey);
+  if (document && cached && sameDocument(cached.document, document)) {
+    const previous = cached.value as SnapshotResult;
+    return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
+      ...previous,
+      text: params.incremental ? "" : previous.text,
+      snapshot_kind: "cached",
+      base_document_version: document.version,
+      removed_refs: [],
+    });
+  }
+
+  let internalBackendNodeIds = document
+    ? ctx.documentCache.overlayBackendNodeIds.get(document.id)
+    : undefined;
+  if (document && !internalBackendNodeIds) {
+    internalBackendNodeIds = await findInternalOverlayBackendNodeIds(deps.cdp, target.tabId);
+    ctx.documentCache.overlayBackendNodeIds.set(document.id, internalBackendNodeIds);
+  }
+  const captured = await captureFailureSnapshot(deps.cdp, ctx, target.tabId, {
+    ...params,
+    internalBackendNodeIds,
+  });
+  if (isRpcError(captured)) return captured;
+  if (!document) {
+    return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
+      ...captured,
+      snapshot_kind: "full",
+    });
+  }
+
+  const previous =
+    cached && cached.document.id === document.id ? (cached.value as SnapshotResult) : null;
+  const full: SnapshotResult = {
+    ...captured,
+    snapshot_kind: "full",
+    document_id: document.id,
+    document_version: document.version,
+    removed_refs: [],
+  };
+  ctx.documentCache.snapshots.set(cacheKey, { document, value: full });
+  if (params.incremental && previous) {
+    const delta = snapshotDelta(previous.text, full.text);
+    return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
+      ...full,
+      text: delta.text,
+      snapshot_kind: "incremental",
+      base_document_version: cached?.document.version,
+      removed_refs: delta.removedRefs,
+    });
+  }
+  return attachDialogs(deps.cdp, target.tabId, dialogCursor, full);
+}
+
+function snapshotDelta(previous: string, current: string): { text: string; removedRefs: string[] } {
+  const oldLines = new Set(previous.split("\n").filter(Boolean));
+  const newLines = new Set(current.split("\n").filter(Boolean));
+  return {
+    text: [...newLines].filter((line) => !oldLines.has(line)).join("\n"),
+    removedRefs: [...oldLines]
+      .filter((line) => !newLines.has(line))
+      .map((line) => line.match(/@([A-Za-z]\w*)/)?.[1])
+      .filter((ref): ref is string => Boolean(ref)),
+  };
 }
 
 /**
@@ -646,13 +710,16 @@ export async function captureFailureSnapshot(
   cdp: SharedCdpRunner,
   ctx: SessionContext,
   tabId: number,
-  options: Pick<SnapshotParams, "max_depth" | "max_tokens"> = {},
+  options: Pick<SnapshotParams, "max_depth" | "max_tokens"> & {
+    internalBackendNodeIds?: Set<number>;
+  } = {},
 ): Promise<SnapshotResult | RpcError> {
   try {
     cdp.trackSessionTab?.(ctx.sessionId, tabId);
     await cdp.send<unknown>(tabId, "Accessibility.enable", {});
     const result = await cdp.send<{ nodes: CdpAxNode[] }>(tabId, "Accessibility.getFullAXTree", {});
-    const internalBackendNodeIds = await findInternalOverlayBackendNodeIds(cdp, tabId);
+    const internalBackendNodeIds =
+      options.internalBackendNodeIds ?? (await findInternalOverlayBackendNodeIds(cdp, tabId));
     const visibleNodes = removeInternalAxNodes(result.nodes ?? [], internalBackendNodeIds);
     const rendered = renderAxTree(visibleNodes, {
       maxDepth: options.max_depth,

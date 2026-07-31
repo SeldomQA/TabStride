@@ -6,6 +6,7 @@
 
 use crate::daemon::info::{self, DaemonInfo};
 use anyhow::Result;
+use std::time::Instant;
 use thiserror::Error;
 
 /// Stable marker used by the central CLI renderer for the explicit-start hint.
@@ -15,5 +16,8 @@ pub struct ServiceNotRunning;
 
 /// Return the endpoint published by a live `tabstride serve` process.
 pub fn ensure_daemon() -> Result<DaemonInfo> {
-    info::read_valid()?.ok_or_else(|| ServiceNotRunning.into())
+    let started = Instant::now();
+    let result = info::read_valid()?.ok_or_else(|| ServiceNotRunning.into());
+    crate::cli::business_rpc::record_daemon_check(started.elapsed());
+    result
 }

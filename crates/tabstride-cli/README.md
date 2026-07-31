@@ -19,10 +19,18 @@ This is the single supported service entrypoint and stays alive until Ctrl+C. Bu
 Business requests log their method, RPC/session/browser identifiers, duration, and outcome without
 logging request payloads or page data.
 
-Use `tabstride -v <business-command>` for client-side timing (`cli_startup_us`,
-`daemon_check_us`, `ipc_connect_us`, `total_runtime_us`). The service logs the matching
-daemon/extension breakdown (`queue_wait_us`, `websocket_us`, `extension_dispatch_us`,
-`cdp_us`, `daemon_runtime_us`) at INFO.
+Use `tabstride <business-command> --timing` for the end-to-end timing breakdown: CLI startup,
+IPC connect, service queue wait, WebSocket transit, extension dispatch, CDP, and total runtime.
+Timings are persisted under the TabStride home and can be queried or exported:
+
+```bash
+tabstride metrics summary
+tabstride metrics export --out metrics.json
+```
+
+Snapshots cache the full accessibility tree while the document version is unchanged. Use
+`tabstride snapshot --session abcd --incremental` to return only changes relative to the previous
+compatible snapshot; navigation and DOM mutations invalidate Locator and Snapshot cache entries.
 
 For Agent harnesses that can keep a child process alive, `tabstride client` exposes the core
 protocol as newline-delimited JSON over stdin/stdout while reusing one authenticated WebSocket

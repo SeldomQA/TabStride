@@ -32,6 +32,7 @@ const ready = {
 function cssCdp(options?: { nodeCounts?: number[]; states?: Array<typeof ready>; url?: string }) {
   let resolutions = 0;
   let inspections = 0;
+  const functionDeclarations: string[] = [];
   const nodeCounts = options?.nodeCounts ?? [1];
   const states = options?.states ?? [ready];
   const send = vi.fn(async (_tabId: number, method: string, params?: object) => {
@@ -48,6 +49,9 @@ function cssCdp(options?: { nodeCounts?: number[]; states?: Array<typeof ready>;
       case "DOM.resolveNode":
         return { object: { objectId: "assertion-node" } };
       case "Runtime.callFunctionOn": {
+        functionDeclarations.push(
+          (params as { functionDeclaration?: string } | undefined)?.functionDeclaration ?? "",
+        );
         const state = states[Math.min(inspections, states.length - 1)];
         inspections += 1;
         return { result: { value: state } };
@@ -63,6 +67,7 @@ function cssCdp(options?: { nodeCounts?: number[]; states?: Array<typeof ready>;
   }) as unknown as CdpRunner["send"];
   return {
     cdp: { send } satisfies CdpRunner,
+    functionDeclarations,
     counts: {
       get resolutions() {
         return resolutions;
@@ -87,6 +92,22 @@ function params(expectation: Partial<AssertParams>): AssertParams {
 }
 
 describe("Web-first Assertions v1", () => {
+  it("uses the same opacity-independent visible semantics as Actionability", async () => {
+    const sm = await manager();
+    const fake = cssCdp();
+
+    const result = await handleAssert(sm, params({ visible: true }), {
+      cdp: fake.cdp,
+      tabsApi: tabs(),
+    });
+
+    expect(result).toMatchObject({ assertion: "visible", passed: true });
+    expect(fake.functionDeclarations).not.toHaveLength(0);
+    expect(fake.functionDeclarations.every((declaration) => !declaration.includes("opacity"))).toBe(
+      true,
+    );
+  });
+
   it("re-resolves until a delayed element becomes visible", async () => {
     const sm = await manager();
     const fake = cssCdp({

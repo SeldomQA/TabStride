@@ -112,6 +112,26 @@ describe("resolveLocator strict matching", () => {
     });
   });
 
+  it("reuses locator results only while the document version is unchanged", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow() });
+    const ctx = await sm.start("aa11");
+    let version = 1;
+    const cdp = fakeCdp({
+      "Runtime.evaluate": () => ({ result: { value: { id: "doc-1", version } } }),
+      "DOM.getDocument": () => ({ root: { nodeId: 1 } }),
+      "DOM.querySelectorAll": () => ({ nodeIds: [7] }),
+      "DOM.describeNode": () => ({ node: { backendNodeId: 70 } }),
+    });
+
+    await resolveLocator(cdp, ctx, 4, { css: "#save" });
+    await resolveLocator(cdp, ctx, 4, { css: "#save" });
+    expect(cdp.send).toHaveBeenCalledTimes(5);
+
+    version = 2;
+    await resolveLocator(cdp, ctx, 4, { css: "#save" });
+    expect(cdp.send).toHaveBeenCalledTimes(9);
+  });
+
   it("returns not_found for zero matches", async () => {
     const manager = new SessionManager({ agentWindow: fakeAgentWindow() });
     const ctx = await manager.start("aa11");

@@ -7,6 +7,7 @@ use tabstride::cli::status::Output;
 use tabstride::{Cli, Command, cli};
 
 fn main() -> ExitCode {
+    cli::business_rpc::mark_cli_started();
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(err) => {
@@ -40,6 +41,7 @@ fn main() -> ExitCode {
 }
 
 fn dispatch(cli: Cli, format: Format) -> Result<(), CliError> {
+    cli::business_rpc::set_timing_enabled(cli.flags.timing);
     match cli.command {
         Command::Serve(args) => cli::daemon::serve(args).map_err(CliError::Local),
         Command::Client(args) => cli::client::run(args).map_err(CliError::Local),
@@ -77,6 +79,7 @@ fn dispatch(cli: Cli, format: Format) -> Result<(), CliError> {
             lines: cmd.lines,
         })
         .map_err(CliError::Local),
+        Command::Metrics(cmd) => cli::metrics::dispatch(cmd, format),
         Command::Session(cmd) => cli::session::dispatch(cmd, format),
         Command::Browsers => cli::browsers::dispatch(format),
         Command::Tab(cmd) => cli::tab::dispatch(cmd, format),

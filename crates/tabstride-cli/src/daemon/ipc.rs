@@ -44,6 +44,9 @@ use super::sessions::{
     start_session, stop_session,
 };
 use super::state::{DAEMON_VERSION, DaemonState, PROTOCOL_VERSION};
+use crate::timing::{
+    MetricRecord, TimingTrace, append_metric, epoch_us, put_trace, take_trace, trace_from,
+};
 
 /// Handler type: async fn(rpc_id, method, params) -> ResponseBody.
 ///
@@ -191,12 +194,16 @@ pub fn system_handler(status: DaemonStatus) -> RpcHandler {
 /// M5 (`session.*`), M6–M9 tool methods, and the M9.3 daemon-local
 /// `tool.wait_ms` / `cancel` paths.
 pub fn full_handler(status: DaemonStatus, state: Arc<DaemonState>) -> RpcHandler {
-    Arc::new(move |rpc_id, method, params| {
+    Arc::new(move |rpc_id, method, mut params| {
         let status = status.clone();
         let state = Arc::clone(&state);
         Box::pin(async move {
             let method_name = method.as_str();
             let should_log = should_log_request(&method);
+            // Timing belongs to the transport envelope, not to strict business
+            // parameters such as FlowRunParams. Keep it aside while the daemon
+            // handles the request and restore it only for browser dispatch.
+            let incoming_timing = take_trace(&mut params).unwrap_or_default();
             let mut context = RequestLogContext::from_request(&state, &params);
             let started_at = Instant::now();
 
@@ -210,7 +217,7 @@ pub fn full_handler(status: DaemonStatus, state: Arc<DaemonState>) -> RpcHandler
                 );
             }
 
-            let body = match method {
+            let mut body = match method {
                 Method::SystemPing => {
                     let result = PingResult { pong: true };
                     ResponseBody::Ok(serde_json::to_value(result).unwrap_or(Value::Null))
@@ -261,6 +268,9 @@ pub fn full_handler(status: DaemonStatus, state: Arc<DaemonState>) -> RpcHandler
                 | Method::ToolEvaluate
                 | Method::ToolWaitForNavigation
                 | Method::ToolRequestHelp => {
+                    if incoming_timing.agent_received_at.is_some() {
+                        put_trace(&mut params, &incoming_timing);
+                    }
                     handle_tool_dispatch(&state, rpc_id.clone(), method, params).await
                 }
                 Method::ToolWaitMs => {
@@ -273,6 +283,22 @@ pub fn full_handler(status: DaemonStatus, state: Arc<DaemonState>) -> RpcHandler
                     data: None,
                 }),
             };
+
+            if incoming_timing.agent_received_at.is_some() {
+                match &mut body {
+                    ResponseBody::Ok(value) if trace_from(value).agent_received_at.is_none() => {
+                        put_trace(value, &incoming_timing);
+                    }
+                    ResponseBody::Err(error) => {
+                        let data = error.data.get_or_insert_with(|| serde_json::json!({}));
+                        if trace_from(data).agent_received_at.is_none() {
+                            put_trace(data, &incoming_timing);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            finalize_timing(method_name, context.session_id.clone(), &mut body);
 
             if should_log {
                 context.fill_from_response(&body);
@@ -303,6 +329,43 @@ pub fn full_handler(status: DaemonStatus, state: Arc<DaemonState>) -> RpcHandler
             body
         })
     })
+}
+
+fn finalize_timing(method: &str, session_id: Option<String>, body: &mut ResponseBody) {
+    let outcome = if matches!(body, ResponseBody::Ok(_)) {
+        "ok"
+    } else {
+        "error"
+    };
+    let mut trace = match body {
+        ResponseBody::Ok(value) => trace_from(value),
+        ResponseBody::Err(error) => error
+            .data
+            .as_ref()
+            .map(trace_from)
+            .unwrap_or_else(TimingTrace::default),
+    };
+    if trace.agent_received_at.is_none() {
+        return;
+    }
+    trace.serve_replied_at = Some(epoch_us());
+    match body {
+        ResponseBody::Ok(value) => put_trace(value, &trace),
+        ResponseBody::Err(error) => {
+            let data = error.data.get_or_insert_with(|| serde_json::json!({}));
+            put_trace(data, &trace);
+        }
+    }
+    let record = MetricRecord {
+        recorded_at: epoch_us(),
+        method: method.to_string(),
+        outcome: outcome.to_string(),
+        session_id,
+        timing: trace,
+    };
+    if let Err(error) = append_metric(&record) {
+        debug!(?error, "failed to persist request metric");
+    }
 }
 
 /// Context safe to emit in request logs. Request payload values are never
@@ -376,6 +439,16 @@ fn should_log_request(method: &Method) -> bool {
             | Method::SessionList
             | Method::BrowserList
     )
+}
+
+fn params_with_timing(params: Option<Value>, timing: Option<Value>) -> Value {
+    let mut params = params.unwrap_or_else(|| serde_json::json!({}));
+    if let Some(timing) = timing
+        && let Value::Object(map) = &mut params
+    {
+        map.insert(crate::timing::TIMING_FIELD.to_string(), timing);
+    }
+    params
 }
 
 /// IPC entry point for `tool.*` RPCs (M6+). Looks up the per-session
@@ -1040,7 +1113,6 @@ mod unix {
     use std::sync::Arc;
 
     use anyhow::{Context, Result};
-    use serde_json::Value;
     use tabstride_protocol::{ErrorCode, Frame, RequestFrame, ResponseBody, RpcError};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::{UnixListener, UnixStream};
@@ -1132,8 +1204,13 @@ mod unix {
             }
 
             let response = match serde_json::from_str::<Frame>(trimmed) {
-                Ok(Frame::Request(RequestFrame { id, method, params })) => {
-                    let params = params.unwrap_or(Value::Null);
+                Ok(Frame::Request(RequestFrame {
+                    id,
+                    method,
+                    params,
+                    timing,
+                })) => {
+                    let params = super::params_with_timing(params, timing);
                     let body = (handler)(id.clone(), method, params).await;
                     let frame = tabstride_protocol::ResponseFrame { id, body };
                     serde_json::to_string(&Frame::Response(frame))?
@@ -1281,8 +1358,13 @@ mod windows {
             }
 
             let response = match serde_json::from_str::<Frame>(trimmed) {
-                Ok(Frame::Request(RequestFrame { id, method, params })) => {
-                    let params = params.unwrap_or(Value::Null);
+                Ok(Frame::Request(RequestFrame {
+                    id,
+                    method,
+                    params,
+                    timing,
+                })) => {
+                    let params = super::params_with_timing(params, timing);
                     let body = (handler)(id.clone(), method, params).await;
                     let frame = tabstride_protocol::ResponseFrame { id, body };
                     serde_json::to_string(&Frame::Response(frame))?
@@ -1520,6 +1602,7 @@ mod tests {
             id: "p1".into(),
             method: Method::SystemPing,
             params: None,
+            timing: None,
         });
         let mut line = serde_json::to_string(&frame).unwrap();
         line.push('\n');
@@ -1567,6 +1650,7 @@ mod tests {
             id: "p2".into(),
             method: Method::SystemHandshake,
             params: None,
+            timing: None,
         });
         let mut line = serde_json::to_string(&frame).unwrap();
         line.push('\n');

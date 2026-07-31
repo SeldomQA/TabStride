@@ -28,6 +28,9 @@ pub struct SnapshotParams {
     /// best-effort heuristic based on character count).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// Return a compact delta when a compatible prior snapshot exists.
+    #[serde(default)]
+    pub incremental: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -48,6 +51,16 @@ pub struct SnapshotResult {
     pub truncated: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dialogs: Vec<JavaScriptDialogInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_document_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_refs: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -180,6 +193,11 @@ mod tests {
             tab_id: 42,
             truncated: false,
             dialogs: vec![],
+            snapshot_kind: Some("full".into()),
+            document_id: Some("doc-1".into()),
+            document_version: Some(1),
+            base_document_version: None,
+            removed_refs: vec![],
         };
         let v = serde_json::to_value(&r).unwrap();
         assert_eq!(v["ref_count"], 1);
