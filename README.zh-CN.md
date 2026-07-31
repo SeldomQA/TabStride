@@ -235,36 +235,49 @@ tabstride flow validate examples/flows/todomvc.yaml
 tabstride flow run examples/flows/todomvc.yaml --session "$session_id" --var task="写代码"
 ```
 
-Flow v1 支持 `navigate`、`click`、`fill`、`press`、`assert`、`snapshot` 和 daemon 本地的
-`wait_ms`。
+Flow v1 支持 `navigate`、`click`、`fill`、`press`、`select`、`wait_for`、
+`request_help`、`assert`、`snapshot` 和 daemon 本地的 `wait_ms`。
 所有步骤按顺序复用单条命令使用的同一个 Session 队列；第一步失败后立即停止，并返回失败步骤及已完成
 步骤的耗时。Flow 总 `timeout` 与各工具的 `timeout_ms` 独立生效，Ctrl+C 会取消当前步骤和剩余 Flow。
 Flow 与单条 CLI 命令使用相同的 Locator 对象和执行路径。例如
 `target: { role: button, name: 保存, exact: true }` 的匹配规则、错误、作用域和超时行为完全一致。
 
-Flow Assertion 与 `tabstride assert` 共用扩展执行器：
+页面就绪应优先使用 `wait_for`，而不是固定延时。它会反复按原始 Locator 重新解析，直到目标达到
+`attached`、`detached`、`visible`、`hidden`、`enabled`、`disabled`、`editable`、
+`checked`、`unchecked` 或 `populated`。`request_help` 可在验证码、登录或确认场景暂停同一个 Flow：
+用户选择继续才执行下一步；取消、超时或页面跳转都会终止 Flow。Flow 总超时应大于人工步骤超时。
+
+步骤内的 `assert` 用于决定能否继续下一步；顶层 `assertions` 是最终验收条件，只在所有动作成功后执行。
+两者都与 `tabstride assert` 共用 Web-first 扩展执行器：
 
 ```yaml
-- assert:
-    target:
-      text: 写代码
-      exact: true
+steps:
+  - wait_for:
+      target: { label: 账户名称 }
+      state: populated
+  - request_help:
+      prompt: 请完成页面确认，然后点击继续。
+      timeout_ms: 60000
+assertions:
+  - target: { text: 已保存, exact: true }
     visible: true
     timeout_ms: 5000
 ```
+
+完整组合示例见 [`examples/flows/complete-runtime.yaml`](examples/flows/complete-runtime.yaml)。
 
 业务请求会记录日志，但不会记录请求内容：
 
 ```text
 INFO request started   rpc_id=nav-a1b2 method="tool.navigate" session="abcd" browser="5301f701"
-INFO request timing    rpc_id=nav-a1b2 method="tool.navigate" queue_wait_us=81 websocket_us=740 extension_dispatch_us=118420 cdp_us=93470 daemon_runtime_us=119310
-INFO request completed rpc_id=nav-a1b2 method="tool.navigate" session="abcd" browser="5301f701" duration_ms=119 total_runtime_us=119508 outcome="ok"
+INFO request completed rpc_id=nav-a1b2 method="tool.navigate" session="abcd" browser="5301f701" duration_ms=119 outcome="ok"
 ```
 
 INFO 级别不记录健康检查请求；表单值、页面内容、选择器和执行脚本均不会进入请求日志。
-使用 `tabstride -v <业务命令>` 还会在 CLI 侧输出 `cli_startup_us`、
-`daemon_check_us`、`ipc_connect_us` 和 `total_runtime_us`。所有 Timing 使用微秒，
-因此本地 IPC 等不足 1ms 的阶段也能被准确观察。
+使用 `tabstride <业务命令> --timing` 可输出 CLI 启动、IPC 连接、队列等待、
+WebSocket、扩展 dispatch、CDP 和总 Runtime，单位均为微秒。历史数据可通过
+`tabstride metrics summary` 汇总，或用 `tabstride metrics export --out metrics.json` 导出。
+重复观察页面时，可使用 `snapshot --incremental` 复用 Document Version 缓存并只返回 AX 树变化。
 
 ## 工作原理
 

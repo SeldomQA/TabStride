@@ -265,8 +265,8 @@ tabstride flow validate examples/flows/todomvc.yaml
 tabstride flow run examples/flows/todomvc.yaml --session "$session_id" --var task="write code"
 ```
 
-Flow v1 supports `navigate`, `click`, `fill`, `press`, `assert`, `snapshot`, and daemon-side
-`wait_ms` steps.
+Flow v1 supports `navigate`, `click`, `fill`, `press`, `select`, `wait_for`, `request_help`,
+`assert`, `snapshot`, and daemon-side `wait_ms` steps.
 Steps run in order through the same session queue as individual CLI commands; the first failure
 stops the flow and reports the failed step plus completed-step timings. A total `timeout` and each
 tool's `timeout_ms` are independent, and Ctrl+C cancels the active step and the remaining flow.
@@ -274,30 +274,47 @@ Flow targets use the same Locator object and execution path as individual comman
 `target: { role: button, name: Save, exact: true }` has identical matching, errors, scope, and
 timeout behavior.
 
-Assertions use the same extension executor as `tabstride assert`:
+Use `wait_for` for page readiness instead of a fixed delay. It re-resolves the original Locator
+until it becomes `attached`, `detached`, `visible`, `hidden`, `enabled`, `disabled`, `editable`,
+`checked`, `unchecked`, or `populated`. `request_help` pauses the same Flow for a captcha, login,
+or confirmation. Continue resumes the next step; Cancel, timeout, or navigation stops the Flow.
+Set the total Flow timeout longer than any human-step timeout.
+
+Inline assertions gate the next step. Top-level `assertions` are final acceptance criteria and run
+only after every action step succeeds. Both forms use the same Web-first executor as
+`tabstride assert`:
 
 ```yaml
-- assert:
-    target:
-      text: Write code
-      exact: true
+steps:
+  - wait_for:
+      target: { label: Account name }
+      state: populated
+  - request_help:
+      prompt: Complete the confirmation, then choose Continue.
+      timeout_ms: 60000
+assertions:
+  - target: { text: Saved, exact: true }
     visible: true
     timeout_ms: 5000
 ```
+
+See [`examples/flows/complete-runtime.yaml`](examples/flows/complete-runtime.yaml) for `select`,
+`wait_for`, a human step, and final assertions together.
 
 Business requests are logged without their payloads:
 
 ```text
 INFO request started   rpc_id=nav-a1b2 method="tool.navigate" session="abcd" browser="5301f701"
-INFO request timing    rpc_id=nav-a1b2 method="tool.navigate" queue_wait_us=81 websocket_us=740 extension_dispatch_us=118420 cdp_us=93470 daemon_runtime_us=119310
-INFO request completed rpc_id=nav-a1b2 method="tool.navigate" session="abcd" browser="5301f701" duration_ms=119 total_runtime_us=119508 outcome="ok"
+INFO request completed rpc_id=nav-a1b2 method="tool.navigate" session="abcd" browser="5301f701" duration_ms=119 outcome="ok"
 ```
 
 Health queries are omitted at INFO level. Form values, page content, selectors, and evaluated
 scripts are never included in request logs.
-Run `tabstride -v <business-command>` to also print client-side `cli_startup_us`,
-`daemon_check_us`, `ipc_connect_us`, and `total_runtime_us`. Timings use microseconds so local IPC
-stages below one millisecond remain visible.
+Run `tabstride <business-command> --timing` to print CLI startup, IPC connect, queue wait,
+WebSocket, extension dispatch, CDP, and total Runtime in microseconds. Historical timings are
+available with `tabstride metrics summary` and `tabstride metrics export --out metrics.json`.
+For repeated observation, `snapshot --incremental` uses the document-version cache and returns only
+accessibility-tree changes.
 
 ## How It Works
 
