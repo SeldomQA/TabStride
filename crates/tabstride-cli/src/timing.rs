@@ -13,7 +13,29 @@ use crate::daemon::paths;
 pub const TIMING_FIELD: &str = "__tabstride_timing";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeCounters {
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cdp_calls: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub full_ax_tree_calls: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub locator_cache_hits: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub locator_cache_misses: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub snapshot_cache_hits: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub snapshot_cache_misses: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub overlay_cache_hits: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub overlay_cache_misses: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TimingTrace {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_received_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -32,16 +54,30 @@ pub struct TimingTrace {
     pub extension_replied_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serve_replied_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "RuntimeCounters::is_empty")]
+    pub counters: RuntimeCounters,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricRecord {
     pub recorded_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
     pub method: String,
     pub outcome: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
     pub timing: TimingTrace,
+}
+
+impl RuntimeCounters {
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 impl TimingTrace {
@@ -153,6 +189,7 @@ mod tests {
     #[test]
     fn derives_every_public_phase_from_schema_timestamps() {
         let trace = TimingTrace {
+            run_id: Some("run-test".into()),
             agent_received_at: Some(100),
             serve_queue_entered_at: Some(110),
             serve_queue_started_at: Some(130),
@@ -162,12 +199,19 @@ mod tests {
             cdp_finished_at: Some(210),
             extension_replied_at: Some(220),
             serve_replied_at: Some(250),
+            counters: RuntimeCounters {
+                cdp_calls: 3,
+                full_ax_tree_calls: 1,
+                ..RuntimeCounters::default()
+            },
         };
         assert_eq!(trace.queue_wait_us(), Some(20));
         assert_eq!(trace.websocket_us(), Some(20));
         assert_eq!(trace.extension_dispatch_us(), Some(60));
         assert_eq!(trace.cdp_us(), Some(40));
         assert_eq!(trace.total_runtime_us(), Some(150));
+        assert_eq!(trace.run_id.as_deref(), Some("run-test"));
+        assert_eq!(trace.counters.full_ax_tree_calls, 1);
     }
 
     #[test]
@@ -180,5 +224,18 @@ mod tests {
         put_trace(&mut value, &trace);
         assert_eq!(take_trace(&mut value), Some(trace));
         assert_eq!(value, serde_json::json!({"tab_id": 7}));
+    }
+
+    #[test]
+    fn old_metrics_without_run_or_counters_remain_compatible() {
+        let record: MetricRecord = serde_json::from_value(serde_json::json!({
+            "recorded_at": 1,
+            "method": "tool.click",
+            "outcome": "ok",
+            "timing": {"agent_received_at": 1, "serve_replied_at": 2}
+        }))
+        .unwrap();
+        assert_eq!(record.run_id, None);
+        assert!(record.timing.counters.is_empty());
     }
 }

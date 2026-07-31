@@ -161,6 +161,27 @@
         <button data-testid="hot-target">Hot target</button>
         <span data-testid="hot-result" data-result>0</span>
       </section>
+
+      <section>
+        <h2>Single-task form benchmark</h2>
+        <form data-testid="baseline-form">
+          <label for="baseline-name">Name</label>
+          <input
+            id="baseline-name"
+            data-testid="baseline-name"
+            minlength="2"
+            maxlength="24"
+            required
+          />
+          <label for="baseline-kind">Kind</label>
+          <select id="baseline-kind" data-testid="baseline-kind">
+            <option value="standard">Standard</option>
+            <option value="priority">Priority</option>
+          </select>
+          <button data-testid="baseline-submit" type="submit">Create</button>
+        </form>
+        <span data-testid="baseline-result" data-result>empty</span>
+      </section>
     </main>
 
     <script>
@@ -250,6 +271,13 @@
       byTestId("hot-target").addEventListener("click", () => {
         hotCount += 1;
         setResult("hot-result", String(hotCount));
+      });
+
+      byTestId("baseline-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const name = byTestId("baseline-name").value;
+        const kind = byTestId("baseline-kind").value;
+        setResult("baseline-result", `${name}:${kind}`);
       });
     </script>
   </body>

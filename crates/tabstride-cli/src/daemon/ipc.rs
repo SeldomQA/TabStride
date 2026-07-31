@@ -358,6 +358,7 @@ fn finalize_timing(method: &str, session_id: Option<String>, body: &mut Response
     }
     let record = MetricRecord {
         recorded_at: epoch_us(),
+        run_id: trace.run_id.clone(),
         method: method.to_string(),
         outcome: outcome.to_string(),
         session_id,

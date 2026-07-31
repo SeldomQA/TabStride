@@ -42,6 +42,7 @@ fn main() -> ExitCode {
 
 fn dispatch(cli: Cli, format: Format) -> Result<(), CliError> {
     cli::business_rpc::set_timing_enabled(cli.flags.timing);
+    cli::business_rpc::set_run_id(cli.flags.run_id.clone());
     match cli.command {
         Command::Serve(args) => cli::daemon::serve(args).map_err(CliError::Local),
         Command::Client(args) => cli::client::run(args).map_err(CliError::Local),

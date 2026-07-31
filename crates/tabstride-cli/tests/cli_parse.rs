@@ -93,11 +93,22 @@ fn parses_timing_and_metrics_commands() {
         "--session",
         "abcd",
         "--timing",
+        "--run-id",
+        "todo-baseline-001",
     ]);
     assert!(cli.flags.timing);
+    assert_eq!(cli.flags.run_id.as_deref(), Some("todo-baseline-001"));
     assert!(matches!(cli.command, Command::Flow(FlowCmd::Run(_))));
 
-    let cli = parse(&["tabstride", "metrics", "summary", "--method", "tool.click"]);
+    let cli = parse(&[
+        "tabstride",
+        "metrics",
+        "summary",
+        "--method",
+        "tool.click",
+        "--run-id",
+        "todo-baseline-001",
+    ]);
     assert!(matches!(
         cli.command,
         Command::Metrics(MetricsCmd::Summary(_))

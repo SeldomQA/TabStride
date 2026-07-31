@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "threshold_percent": 15,
+  "minimum_samples": 20,
+  "scenarios": {
+    "attach_single_task": {
+      "p95_ms": 240
+    },
+    "isolated_single_task": {
+      "p95_ms": 345
+    }
+  }
+}

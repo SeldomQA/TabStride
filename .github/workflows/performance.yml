@@ -41,10 +41,17 @@ jobs:
         env:
           TABSTRIDE_CHROME: ${{ steps.chrome.outputs.chrome-path }}
 
+      - name: Run single-task baseline
+        run: pnpm perf:task
+        env:
+          TABSTRIDE_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+
       - name: Upload benchmark report
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: actionability-performance
-          path: artifacts/actionability-performance.json
+          path: |
+            artifacts/actionability-performance.json
+            artifacts/single-task-performance.json
           if-no-files-found: warn

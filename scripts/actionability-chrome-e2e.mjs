@@ -134,17 +134,7 @@ async function main() {
       );
     }
 
-    const start = runCli(binary, commandEnv, [
-      "session",
-      "start",
-      "--mode",
-      "attach",
-      "--tab",
-      "active",
-    ]);
-    expectOk(start, "start attach session");
-    sessionId = start.json.session_id;
-    const attachedTabId = start.json.attached_tab_id;
+    const attachedTabId = await waitForExtensionTabId(fixtureUrl);
     const extensionWorker = await devtools.serviceWorker();
     const attachProbe = await extensionWorker.evaluate(
       `new Promise((resolve) => chrome.debugger
@@ -159,23 +149,45 @@ async function main() {
     }
     const context = { binary, env: commandEnv, fixtureUrl, attachedTabId };
 
-    if (options.mode !== "benchmark") {
-      try {
-        await runE2e(context);
-      } catch (error) {
-        throw new Error(
-          `${error}\nServe output:\n${serve.capturedOutput}\nChrome output:\n${chromeProcess.capturedOutput}`,
-        );
-      }
-    }
-    if (options.mode !== "e2e") {
-      await runBenchmark(context, options.samples, options.baseline, options.report);
-    }
+    if (options.mode === "task-baseline") {
+      await runTaskBaseline(
+        context,
+        options.samples,
+        options.taskBaseline,
+        options.taskReport,
+        tabstrideHome,
+      );
+      console.log("PASS real Chrome single-task performance baseline");
+    } else {
+      const start = runCli(binary, commandEnv, [
+        "session",
+        "start",
+        "--mode",
+        "attach",
+        "--tab-id",
+        String(attachedTabId),
+      ]);
+      expectOk(start, "start attach session");
+      sessionId = start.json.session_id;
 
-    const stop = runCli(binary, commandEnv, ["session", "stop", sessionId]);
-    expectOk(stop, "stop attach session");
-    sessionId = undefined;
-    console.log("PASS real Chrome Actionability E2E and performance regression");
+      if (options.mode !== "benchmark") {
+        try {
+          await runE2e(context);
+        } catch (error) {
+          throw new Error(
+            `${error}\nServe output:\n${serve.capturedOutput}\nChrome output:\n${chromeProcess.capturedOutput}`,
+          );
+        }
+      }
+      if (options.mode !== "e2e") {
+        await runBenchmark(context, options.samples, options.baseline, options.report);
+      }
+
+      const stop = runCli(binary, commandEnv, ["session", "stop", sessionId]);
+      expectOk(stop, "stop attach session");
+      sessionId = undefined;
+      console.log("PASS real Chrome Actionability E2E and performance regression");
+    }
   } finally {
     if (sessionId) {
       try {
@@ -441,12 +453,266 @@ async function runBenchmark(ctx, samples, baselinePath, reportPath) {
   }
 }
 
+async function runTaskBaseline(ctx, samples, baselinePath, reportPath, tabstrideHome) {
+  const scenarios = {
+    attach_single_task: [],
+    isolated_single_task: [],
+  };
+  console.log(`Benchmark complete single-task paths (${samples} samples per session mode)`);
+
+  for (const [scenario, mode] of [
+    ["attach_single_task", "attach"],
+    ["isolated_single_task", "isolated"],
+  ]) {
+    for (let index = 0; index < samples; index += 1) {
+      const runId = `baseline-${mode}-${Date.now()}-${index}`;
+      const taskStarted = performance.now();
+      const cli = (...args) => runCli(ctx.binary, ctx.env, ["--run-id", runId, ...args]);
+      let taskSession;
+      let taskTabId;
+      let flowFile = join(fixtureDir, "task-baseline-attach.yaml");
+      let cliProcesses = 0;
+      try {
+        const startArgs =
+          mode === "attach"
+            ? ["session", "start", "--mode", "attach", "--tab-id", String(ctx.attachedTabId)]
+            : ["session", "start"];
+        const start = cli(...startArgs);
+        cliProcesses += 1;
+        expectOk(start, `${scenario} session start`);
+        taskSession = start.json.session_id;
+        const attachMs = start.durationMs;
+
+        if (mode === "isolated") {
+          const create = cli("tab", "create", "--session", taskSession, "--url", ctx.fixtureUrl);
+          cliProcesses += 1;
+          expectOk(create, `${scenario} create fixture tab`);
+          taskTabId = create.json.tab_id;
+          flowFile = join(temporaryRoot, `${runId}.json`);
+          await writeFile(flowFile, `${JSON.stringify(taskFlowForTab(taskTabId), null, 2)}\n`);
+        }
+
+        const snapshotTabArgs = taskTabId === undefined ? [] : ["--tab-id", String(taskTabId)];
+        const initialSnapshot = cli("snapshot", "--session", taskSession, ...snapshotTabArgs);
+        cliProcesses += 1;
+        expectOk(initialSnapshot, `${scenario} initial snapshot`);
+        const firstActionDispatchMs = performance.now() - taskStarted;
+
+        const flow = cli("flow", "run", flowFile, "--session", taskSession);
+        cliProcesses += 1;
+        expectOk(flow, `${scenario} flow`);
+
+        const finalSnapshot = cli("snapshot", "--session", taskSession, ...snapshotTabArgs);
+        cliProcesses += 1;
+        expectOk(finalSnapshot, `${scenario} final snapshot`);
+
+        const stop = cli("session", "stop", taskSession);
+        cliProcesses += 1;
+        expectOk(stop, `${scenario} session stop`);
+        taskSession = undefined;
+
+        const taskTotalMs = performance.now() - taskStarted;
+        const metrics = await metricsForRun(tabstrideHome, runId);
+        const counters = sumRuntimeCounters(metrics);
+        scenarios[scenario].push({
+          run_id: runId,
+          temperature: index === 0 ? "cold" : "warm",
+          mode,
+          task_total_ms: round(taskTotalMs),
+          attach_ms: round(attachMs),
+          first_action_dispatch_ms: round(firstActionDispatchMs),
+          flow_ms: round(flow.durationMs),
+          session_stop_ms: round(stop.durationMs),
+          cli_process_count: cliProcesses,
+          rpc_count: metrics.length,
+          flow_count: 1,
+          flow_step_count: flow.json?.completed_steps?.length ?? 0,
+          snapshot_request_count: metrics.filter((record) => record.method === "tool.snapshot")
+            .length,
+          full_ax_tree_calls: counters.full_ax_tree_calls,
+          cdp_calls: counters.cdp_calls,
+          locator_cache_hit_rate: counterHitRate(
+            counters.locator_cache_hits,
+            counters.locator_cache_misses,
+          ),
+          snapshot_cache_hit_rate: counterHitRate(
+            counters.snapshot_cache_hits,
+            counters.snapshot_cache_misses,
+          ),
+          overlay_cache_hit_rate: counterHitRate(
+            counters.overlay_cache_hits,
+            counters.overlay_cache_misses,
+          ),
+        });
+      } finally {
+        if (taskSession) {
+          cli("session", "stop", taskSession);
+        }
+      }
+    }
+  }
+
+  const report = {
+    schema_version: 1,
+    generated_at: new Date().toISOString(),
+    chrome: basename(findChrome()),
+    samples_per_scenario: samples,
+    measurement: {
+      first_action_dispatch:
+        "elapsed from task harness start until flow.run is submitted; browser-side step timing is added in Task A-5",
+      cold: "first task after Chrome and extension startup",
+      warm: "subsequent tasks in the same browser process",
+    },
+    scenarios: Object.fromEntries(
+      Object.entries(scenarios).map(([name, runs]) => [name, summarizeTaskRuns(runs)]),
+    ),
+    runs: scenarios,
+  };
+
+  const baseline = JSON.parse(await readFile(resolve(repoRoot, baselinePath), "utf8"));
+  const threshold = baseline.threshold_percent ?? 15;
+  if (samples < (baseline.minimum_samples ?? 1)) {
+    throw new Error(
+      `single-task regression requires at least ${baseline.minimum_samples} samples; received ${samples}`,
+    );
+  }
+  const regressions = [];
+  for (const [name, actual] of Object.entries(report.scenarios)) {
+    const expectedP95 = baseline.scenarios?.[name]?.p95_ms;
+    if (typeof expectedP95 !== "number") {
+      throw new Error(`single-task baseline is missing ${name}.p95_ms`);
+    }
+    const limit = expectedP95 * (1 + threshold / 100);
+    actual.baseline_p95_ms = expectedP95;
+    actual.regression_limit_p95_ms = round(limit);
+    if (actual.task_total_ms.p95_ms > limit) {
+      regressions.push(`${name}: p95 ${actual.task_total_ms.p95_ms}ms > ${round(limit)}ms`);
+    }
+  }
+
+  const output = `${JSON.stringify(report, null, 2)}\n`;
+  console.log(output.trimEnd());
+  const absoluteReportPath = resolve(repoRoot, reportPath);
+  await mkdir(dirname(absoluteReportPath), { recursive: true });
+  await writeFile(absoluteReportPath, output);
+  if (regressions.length > 0) {
+    throw new Error(
+      `single-task P95 regression exceeded ${threshold}%:\n${regressions.join("\n")}`,
+    );
+  }
+}
+
+function taskFlowForTab(tabId) {
+  return {
+    name: "single-task-isolated-performance-baseline",
+    timeout: "30s",
+    steps: [
+      {
+        fill: {
+          target: { testId: "baseline-name" },
+          value: "Baseline customer",
+          tab_id: tabId,
+        },
+      },
+      {
+        select: {
+          target: { testId: "baseline-kind" },
+          values: ["priority"],
+          tab_id: tabId,
+        },
+      },
+      {
+        click: {
+          target: { testId: "baseline-submit" },
+          tab_id: tabId,
+        },
+      },
+    ],
+    assertions: [
+      {
+        target: { testId: "baseline-result" },
+        text_equals: "Baseline customer:priority",
+        timeout_ms: 3000,
+        tab_id: tabId,
+      },
+    ],
+  };
+}
+
+async function metricsForRun(tabstrideHome, runId) {
+  const path = join(tabstrideHome, "metrics.jsonl");
+  const contents = await readFile(path, "utf8").catch((error) => {
+    if (error?.code === "ENOENT") return "";
+    throw error;
+  });
+  return contents
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((record) => record.run_id === runId);
+}
+
+function sumRuntimeCounters(records) {
+  const total = {
+    cdp_calls: 0,
+    full_ax_tree_calls: 0,
+    locator_cache_hits: 0,
+    locator_cache_misses: 0,
+    snapshot_cache_hits: 0,
+    snapshot_cache_misses: 0,
+    overlay_cache_hits: 0,
+    overlay_cache_misses: 0,
+  };
+  for (const record of records) {
+    for (const key of Object.keys(total)) {
+      total[key] += record.timing?.counters?.[key] ?? 0;
+    }
+  }
+  return total;
+}
+
+function counterHitRate(hits, misses) {
+  const total = hits + misses;
+  return total === 0 ? null : round(hits / total);
+}
+
+function summarizeTaskRuns(runs) {
+  const warm = runs.filter((run) => run.temperature === "warm");
+  const measured = warm.length > 0 ? warm : runs;
+  return {
+    samples: runs.length,
+    warm_samples: warm.length,
+    cold_run: runs[0],
+    task_total_ms: summarize(measured.map((run) => run.task_total_ms)),
+    attach_ms: summarize(measured.map((run) => run.attach_ms)),
+    first_action_dispatch_ms: summarize(measured.map((run) => run.first_action_dispatch_ms)),
+    flow_ms: summarize(measured.map((run) => run.flow_ms)),
+    session_stop_ms: summarize(measured.map((run) => run.session_stop_ms)),
+    cli_process_count: summarizeCount(measured.map((run) => run.cli_process_count)),
+    rpc_count: summarizeCount(measured.map((run) => run.rpc_count)),
+    snapshot_request_count: summarizeCount(measured.map((run) => run.snapshot_request_count)),
+    full_ax_tree_calls: summarizeCount(measured.map((run) => run.full_ax_tree_calls)),
+    cdp_calls: summarizeCount(measured.map((run) => run.cdp_calls)),
+    snapshot_cache_hit_rate: meanOptional(measured.map((run) => run.snapshot_cache_hit_rate)),
+    locator_cache_hit_rate: meanOptional(measured.map((run) => run.locator_cache_hit_rate)),
+    overlay_cache_hit_rate: meanOptional(measured.map((run) => run.overlay_cache_hit_rate)),
+  };
+}
+
+function meanOptional(values) {
+  const present = values.filter((value) => typeof value === "number");
+  if (present.length === 0) return null;
+  return round(present.reduce((sum, value) => sum + value, 0) / present.length);
+}
+
 function parseArgs(args) {
   const parsed = {
     binary: "target/debug/tabstride",
     extension: "apps/extension/dist/chrome-mv3",
     baseline: "tests/e2e/actionability/performance-baseline.json",
+    taskBaseline: "tests/e2e/actionability/task-performance-baseline.json",
     report: "",
+    taskReport: "artifacts/single-task-performance.json",
     mode: "all",
     samples: 20,
     prepare: false,
@@ -459,13 +725,15 @@ function parseArgs(args) {
     else if (arg === "--binary") parsed.binary = args[++index];
     else if (arg === "--extension") parsed.extension = args[++index];
     else if (arg === "--baseline") parsed.baseline = args[++index];
+    else if (arg === "--task-baseline") parsed.taskBaseline = args[++index];
     else if (arg === "--report") parsed.report = args[++index];
+    else if (arg === "--task-report") parsed.taskReport = args[++index];
     else if (arg === "--mode") parsed.mode = args[++index];
     else if (arg === "--samples") parsed.samples = Number(args[++index]);
     else throw new Error(`unknown argument: ${arg}`);
   }
-  if (!["all", "e2e", "benchmark"].includes(parsed.mode)) {
-    throw new Error("--mode must be all, e2e, or benchmark");
+  if (!["all", "e2e", "benchmark", "task-baseline"].includes(parsed.mode)) {
+    throw new Error("--mode must be all, e2e, benchmark, or task-baseline");
   }
   if (!Number.isInteger(parsed.samples) || parsed.samples < 1) {
     throw new Error("--samples must be a positive integer");
@@ -779,6 +1047,18 @@ function summarize(values) {
     p99_ms: round(percentile(sorted, 0.99)),
     min_ms: round(sorted[0]),
     max_ms: round(sorted.at(-1)),
+  };
+}
+
+function summarizeCount(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return {
+    samples: sorted.length,
+    p50: round(percentile(sorted, 0.5)),
+    p95: round(percentile(sorted, 0.95)),
+    p99: round(percentile(sorted, 0.99)),
+    min: round(sorted[0]),
+    max: round(sorted.at(-1)),
   };
 }
 

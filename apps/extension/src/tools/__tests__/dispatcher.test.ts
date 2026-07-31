@@ -71,6 +71,60 @@ describe("ToolDispatcher", () => {
     });
   });
 
+  it("attaches request counters to timing metadata", async () => {
+    vi.stubGlobal("chrome", {
+      tabs: {
+        query: vi.fn(async () => [{ id: 7, windowId: 4242, active: true }]),
+      },
+    });
+    const { transport, sent, deliver } = fakeTransport();
+    const sessions = new SessionManager({
+      agentWindow: {
+        create: vi.fn(async () => 4242),
+        remove: vi.fn(async () => {}),
+        ensureActiveTab: vi.fn(async () => {}),
+      },
+    });
+    await sessions.start("aa11");
+    const cdp = {
+      send: vi.fn(async (_tabId: number, method: string) => {
+        if (method === "Runtime.evaluate") {
+          return { result: { value: { id: "doc-1", version: 1 } } };
+        }
+        if (method === "Accessibility.enable") return {};
+        if (method === "Accessibility.getFullAXTree") return { nodes: [] };
+        if (method === "DOM.getDocument") return { root: { nodeId: 1 } };
+        if (method === "DOM.querySelector") return { nodeId: 0 };
+        throw new Error(`unexpected CDP call ${method}`);
+      }) as unknown as CdpRunner["send"],
+      detachSession: vi.fn(async () => {}),
+    };
+    const dispatcher = new ToolDispatcher({ transport, sessions, cdp });
+    dispatcher.start();
+
+    const request = makeRequest("tool.snapshot", { session_id: "aa11" });
+    request.timing = { run_id: "baseline-run" };
+    deliver(request);
+    await flushMicrotasks();
+
+    expect(sent[0]).toMatchObject({
+      result: {
+        __tabstride_timing: {
+          run_id: "baseline-run",
+          counters: {
+            full_ax_tree_calls: 1,
+            snapshot_cache_misses: 1,
+            overlay_cache_misses: 1,
+          },
+        },
+      },
+    });
+    const timing = (
+      sent[0] as { result: { __tabstride_timing: { counters: { cdp_calls: number } } } }
+    ).result.__tabstride_timing;
+    expect(timing.counters.cdp_calls).toBeGreaterThanOrEqual(5);
+  });
+
   it("publishes running and completed operation log states", async () => {
     const { transport, deliver } = fakeTransport();
     const sessions = new SessionManager({
@@ -576,5 +630,5 @@ async function flushMicrotasks() {
   // turns to drain even the deepest invocation graph (M10.2 added
   // `Promise.race` wrapping on top of the existing await depth, which
   // pushes the required-turn count past the original 4).
-  for (let i = 0; i < 16; i += 1) await Promise.resolve();
+  for (let i = 0; i < 64; i += 1) await Promise.resolve();
 }

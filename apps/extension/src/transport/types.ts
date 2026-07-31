@@ -62,6 +62,7 @@ export interface RequestFrame {
 }
 
 export interface TimingTrace {
+  run_id?: string;
   agent_received_at?: number;
   serve_queue_entered_at?: number;
   serve_queue_started_at?: number;
@@ -71,6 +72,18 @@ export interface TimingTrace {
   cdp_finished_at?: number;
   extension_replied_at?: number;
   serve_replied_at?: number;
+  counters?: RuntimeCounters;
+}
+
+export interface RuntimeCounters {
+  cdp_calls?: number;
+  full_ax_tree_calls?: number;
+  locator_cache_hits?: number;
+  locator_cache_misses?: number;
+  snapshot_cache_hits?: number;
+  snapshot_cache_misses?: number;
+  overlay_cache_hits?: number;
+  overlay_cache_misses?: number;
 }
 
 export interface OkResponseFrame {

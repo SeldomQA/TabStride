@@ -522,6 +522,7 @@ describe("handleSnapshot", () => {
     };
     const send = vi.fn(sendImpl);
     const trackSessionTab = vi.fn();
+    const runtimeCounters = {};
     const cdp = {
       send: send as unknown as <T = unknown>(
         tabId: number,
@@ -529,6 +530,7 @@ describe("handleSnapshot", () => {
         params?: object,
       ) => Promise<T>,
       trackSessionTab,
+      runtimeCounters,
     };
     return {
       cdp,
@@ -614,6 +616,11 @@ describe("handleSnapshot", () => {
     expect(
       deps.send.mock.calls.filter((call) => call[1] === "Accessibility.getFullAXTree"),
     ).toHaveLength(1);
+    expect(deps.cdp.runtimeCounters).toMatchObject({
+      snapshot_cache_hits: 1,
+      snapshot_cache_misses: 1,
+      overlay_cache_misses: 1,
+    });
   });
 
   it("excludes TabStride overlay controls from text and refs", async () => {

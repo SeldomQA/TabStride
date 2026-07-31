@@ -28,6 +28,18 @@ tabstride metrics summary
 tabstride metrics export --out metrics.json
 ```
 
+Use one stable id across the commands that make up a user task:
+
+```bash
+tabstride session start --mode attach --tab active --run-id task-001
+tabstride flow run task.yaml --session abcd --run-id task-001
+tabstride session stop abcd --run-id task-001
+tabstride metrics summary --run-id task-001
+```
+
+Task-correlated metrics include CDP and full accessibility-tree call counts
+plus Locator, Snapshot, and overlay cache hit rates.
+
 Snapshots cache the full accessibility tree while the document version is unchanged. Use
 `tabstride snapshot --session abcd --incremental` to return only changes relative to the previous
 compatible snapshot; navigation and DOM mutations invalidate Locator and Snapshot cache entries.

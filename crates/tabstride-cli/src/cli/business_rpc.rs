@@ -19,8 +19,8 @@
 //! "kill the CLI process" behaviour for short status reads.
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
@@ -36,6 +36,7 @@ use crate::timing::{TIMING_FIELD, TimingTrace, epoch_us, take_trace};
 static CLI_STARTED: OnceLock<Instant> = OnceLock::new();
 static TIMING_ENABLED: AtomicBool = AtomicBool::new(false);
 static DAEMON_CHECK_US: AtomicU64 = AtomicU64::new(0);
+static RUN_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 pub fn mark_cli_started() {
     let _ = CLI_STARTED.set(Instant::now());
@@ -43,6 +44,13 @@ pub fn mark_cli_started() {
 
 pub fn set_timing_enabled(enabled: bool) {
     TIMING_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+pub fn set_run_id(run_id: Option<String>) {
+    *RUN_ID
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = run_id;
 }
 
 pub fn record_daemon_check(duration: Duration) {
@@ -110,6 +118,11 @@ where
         map.insert(
             TIMING_FIELD.to_string(),
             serde_json::to_value(TimingTrace {
+                run_id: RUN_ID
+                    .get_or_init(|| Mutex::new(None))
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .clone(),
                 agent_received_at: Some(epoch_us()),
                 ..TimingTrace::default()
             })

@@ -21,6 +21,7 @@ import { nodeBoundingRect, scrollNodeIntoView } from "./element-geometry";
 import { rpcError } from "./errors";
 import {
   type ChromeTabsApi,
+  incrementRuntimeCounter,
   isRpcError,
   lookupSession,
   resolveTargetTab,
@@ -638,6 +639,7 @@ export async function handleSnapshot(
   const cacheKey = `${target.tabId}:${params.max_depth ?? ""}:${params.max_tokens ?? ""}`;
   const cached = ctx.documentCache.snapshots.get(cacheKey);
   if (document && cached && sameDocument(cached.document, document)) {
+    incrementRuntimeCounter(deps.cdp, "snapshot_cache_hits");
     const previous = cached.value as SnapshotResult;
     return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
       ...previous,
@@ -647,11 +649,16 @@ export async function handleSnapshot(
       removed_refs: [],
     });
   }
+  if (document) incrementRuntimeCounter(deps.cdp, "snapshot_cache_misses");
 
   let internalBackendNodeIds = document
     ? ctx.documentCache.overlayBackendNodeIds.get(document.id)
     : undefined;
+  if (document && internalBackendNodeIds) {
+    incrementRuntimeCounter(deps.cdp, "overlay_cache_hits");
+  }
   if (document && !internalBackendNodeIds) {
+    incrementRuntimeCounter(deps.cdp, "overlay_cache_misses");
     internalBackendNodeIds = await findInternalOverlayBackendNodeIds(deps.cdp, target.tabId);
     ctx.documentCache.overlayBackendNodeIds.set(document.id, internalBackendNodeIds);
   }

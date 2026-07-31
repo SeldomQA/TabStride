@@ -520,10 +520,16 @@ function epochMicroseconds(): number {
 }
 
 function timedCdp<T extends CdpRunner>(cdp: T, timing: TimingTrace): T {
+  timing.counters ??= {};
   return new Proxy(cdp, {
     get(target, property, receiver) {
+      if (property === "runtimeCounters") return timing.counters;
       if (property === "send") {
         return async (...args: Parameters<CdpRunner["send"]>) => {
+          timing.counters!.cdp_calls = (timing.counters!.cdp_calls ?? 0) + 1;
+          if (args[1] === "Accessibility.getFullAXTree") {
+            timing.counters!.full_ax_tree_calls = (timing.counters!.full_ax_tree_calls ?? 0) + 1;
+          }
           timing.cdp_started_at ??= epochMicroseconds();
           try {
             return await target.send(...args);

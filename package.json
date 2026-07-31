@@ -10,6 +10,7 @@
     "ext:test": "pnpm --filter @tabstride/extension test",
     "e2e:chrome": "node scripts/actionability-chrome-e2e.mjs --prepare --mode e2e",
     "perf:chrome": "node scripts/actionability-chrome-e2e.mjs --prepare --mode benchmark --report artifacts/actionability-performance.json",
+    "perf:task": "node scripts/actionability-chrome-e2e.mjs --prepare --mode task-baseline --task-report artifacts/single-task-performance.json",
     "test:chrome": "node scripts/actionability-chrome-e2e.mjs --prepare --mode all --report artifacts/actionability-performance.json",
     "lint": "biome check . && stylelint \"**/*.css\"",
     "format": "biome format --write ."

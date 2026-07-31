@@ -1,0 +1,277 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-31T05:27:20.858Z",
+  "chrome": "Google Chrome",
+  "samples_per_scenario": 2,
+  "measurement": {
+    "first_action_dispatch": "elapsed from task harness start until flow.run is submitted",
+    "cold": "first task after Chrome and extension startup",
+    "warm": "subsequent tasks in the same browser process"
+  },
+  "scenarios": {
+    "attach_single_task": {
+      "samples": 2,
+      "warm_samples": 1,
+      "cold_run": {
+        "run_id": "baseline-attach-example-0",
+        "temperature": "cold",
+        "mode": "attach",
+        "task_total_ms": 276.556,
+        "attach_ms": 17.47,
+        "first_action_dispatch_ms": 136.661,
+        "flow_ms": 120.771,
+        "session_stop_ms": 7.156,
+        "cli_process_count": 5,
+        "rpc_count": 5,
+        "flow_count": 1,
+        "flow_step_count": 4,
+        "snapshot_request_count": 2,
+        "full_ax_tree_calls": 2,
+        "cdp_calls": 9,
+        "locator_cache_hit_rate": null,
+        "snapshot_cache_hit_rate": 0,
+        "overlay_cache_hit_rate": 0.5
+      },
+      "task_total_ms": {
+        "samples": 1,
+        "p50_ms": 112.404,
+        "p95_ms": 112.404,
+        "p99_ms": 112.404,
+        "min_ms": 112.404,
+        "max_ms": 112.404
+      },
+      "attach_ms": {
+        "samples": 1,
+        "p50_ms": 5.979,
+        "p95_ms": 5.979,
+        "p99_ms": 5.979,
+        "min_ms": 5.979,
+        "max_ms": 5.979
+      },
+      "first_action_dispatch_ms": {
+        "samples": 1,
+        "p50_ms": 17.909,
+        "p95_ms": 17.909,
+        "p99_ms": 17.909,
+        "min_ms": 17.909,
+        "max_ms": 17.909
+      },
+      "flow_ms": {
+        "samples": 1,
+        "p50_ms": 76.697,
+        "p95_ms": 76.697,
+        "p99_ms": 76.697,
+        "min_ms": 76.697,
+        "max_ms": 76.697
+      },
+      "session_stop_ms": {
+        "samples": 1,
+        "p50_ms": 6.754,
+        "p95_ms": 6.754,
+        "p99_ms": 6.754,
+        "min_ms": 6.754,
+        "max_ms": 6.754
+      },
+      "cli_process_count": {
+        "samples": 1,
+        "p50": 5,
+        "p95": 5,
+        "p99": 5,
+        "min": 5,
+        "max": 5
+      },
+      "rpc_count": {
+        "samples": 1,
+        "p50": 5,
+        "p95": 5,
+        "p99": 5,
+        "min": 5,
+        "max": 5
+      },
+      "snapshot_request_count": {
+        "samples": 1,
+        "p50": 2,
+        "p95": 2,
+        "p99": 2,
+        "min": 2,
+        "max": 2
+      },
+      "full_ax_tree_calls": {
+        "samples": 1,
+        "p50": 2,
+        "p95": 2,
+        "p99": 2,
+        "min": 2,
+        "max": 2
+      },
+      "cdp_calls": {
+        "samples": 1,
+        "p50": 9,
+        "p95": 9,
+        "p99": 9,
+        "min": 9,
+        "max": 9
+      },
+      "snapshot_cache_hit_rate": 0,
+      "locator_cache_hit_rate": null,
+      "overlay_cache_hit_rate": 0.5,
+      "baseline_p95_ms": 240,
+      "regression_limit_p95_ms": 276
+    },
+    "isolated_single_task": {
+      "samples": 2,
+      "warm_samples": 1,
+      "cold_run": {
+        "run_id": "baseline-isolated-example-0",
+        "temperature": "cold",
+        "mode": "isolated",
+        "task_total_ms": 280.452,
+        "attach_ms": 93.254,
+        "first_action_dispatch_ms": 105.064,
+        "flow_ms": 124.839,
+        "session_stop_ms": 16.132,
+        "cli_process_count": 6,
+        "rpc_count": 6,
+        "flow_count": 1,
+        "flow_step_count": 4,
+        "snapshot_request_count": 2,
+        "full_ax_tree_calls": 2,
+        "cdp_calls": 11,
+        "locator_cache_hit_rate": null,
+        "snapshot_cache_hit_rate": 0,
+        "overlay_cache_hit_rate": 0
+      },
+      "task_total_ms": {
+        "samples": 1,
+        "p50_ms": 267.866,
+        "p95_ms": 267.866,
+        "p99_ms": 267.866,
+        "min_ms": 267.866,
+        "max_ms": 267.866
+      },
+      "attach_ms": {
+        "samples": 1,
+        "p50_ms": 74.94,
+        "p95_ms": 74.94,
+        "p99_ms": 74.94,
+        "min_ms": 74.94,
+        "max_ms": 74.94
+      },
+      "first_action_dispatch_ms": {
+        "samples": 1,
+        "p50_ms": 88.082,
+        "p95_ms": 88.082,
+        "p99_ms": 88.082,
+        "min_ms": 88.082,
+        "max_ms": 88.082
+      },
+      "flow_ms": {
+        "samples": 1,
+        "p50_ms": 119.282,
+        "p95_ms": 119.282,
+        "p99_ms": 119.282,
+        "min_ms": 119.282,
+        "max_ms": 119.282
+      },
+      "session_stop_ms": {
+        "samples": 1,
+        "p50_ms": 12.981,
+        "p95_ms": 12.981,
+        "p99_ms": 12.981,
+        "min_ms": 12.981,
+        "max_ms": 12.981
+      },
+      "cli_process_count": {
+        "samples": 1,
+        "p50": 6,
+        "p95": 6,
+        "p99": 6,
+        "min": 6,
+        "max": 6
+      },
+      "rpc_count": {
+        "samples": 1,
+        "p50": 6,
+        "p95": 6,
+        "p99": 6,
+        "min": 6,
+        "max": 6
+      },
+      "snapshot_request_count": {
+        "samples": 1,
+        "p50": 2,
+        "p95": 2,
+        "p99": 2,
+        "min": 2,
+        "max": 2
+      },
+      "full_ax_tree_calls": {
+        "samples": 1,
+        "p50": 2,
+        "p95": 2,
+        "p99": 2,
+        "min": 2,
+        "max": 2
+      },
+      "cdp_calls": {
+        "samples": 1,
+        "p50": 11,
+        "p95": 11,
+        "p99": 11,
+        "min": 11,
+        "max": 11
+      },
+      "snapshot_cache_hit_rate": 0,
+      "locator_cache_hit_rate": null,
+      "overlay_cache_hit_rate": 0,
+      "baseline_p95_ms": 345,
+      "regression_limit_p95_ms": 396.75
+    }
+  },
+  "runs": {
+    "attach_single_task": [
+      {
+        "run_id": "baseline-attach-example-0",
+        "temperature": "cold",
+        "mode": "attach",
+        "task_total_ms": 276.556,
+        "attach_ms": 17.47,
+        "first_action_dispatch_ms": 136.661,
+        "flow_ms": 120.771,
+        "session_stop_ms": 7.156,
+        "cli_process_count": 5,
+        "rpc_count": 5,
+        "flow_count": 1,
+        "flow_step_count": 4,
+        "snapshot_request_count": 2,
+        "full_ax_tree_calls": 2,
+        "cdp_calls": 9,
+        "locator_cache_hit_rate": null,
+        "snapshot_cache_hit_rate": 0,
+        "overlay_cache_hit_rate": 0.5
+      }
+    ],
+    "isolated_single_task": [
+      {
+        "run_id": "baseline-isolated-example-0",
+        "temperature": "cold",
+        "mode": "isolated",
+        "task_total_ms": 280.452,
+        "attach_ms": 93.254,
+        "first_action_dispatch_ms": 105.064,
+        "flow_ms": 124.839,
+        "session_stop_ms": 16.132,
+        "cli_process_count": 6,
+        "rpc_count": 6,
+        "flow_count": 1,
+        "flow_step_count": 4,
+        "snapshot_request_count": 2,
+        "full_ax_tree_calls": 2,
+        "cdp_calls": 11,
+        "locator_cache_hit_rate": null,
+        "snapshot_cache_hit_rate": 0,
+        "overlay_cache_hit_rate": 0
+      }
+    ]
+  }
+}

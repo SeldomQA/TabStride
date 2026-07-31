@@ -1,0 +1,21 @@
+name: single-task-attach-performance-baseline
+timeout: 30s
+
+steps:
+  - fill:
+      target:
+        testId: baseline-name
+      value: Baseline customer
+  - select:
+      target:
+        testId: baseline-kind
+      values: [priority]
+  - click:
+      target:
+        testId: baseline-submit
+
+assertions:
+  - target:
+      testId: baseline-result
+    text_equals: "Baseline customer:priority"
+    timeout_ms: 3000

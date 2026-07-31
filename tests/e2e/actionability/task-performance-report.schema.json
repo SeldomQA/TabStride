@@ -1,0 +1,309 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tabstride.dev/schema/task-performance-report-v1.json",
+  "title": "TabStride single-task performance report",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "samples_per_scenario",
+    "measurement",
+    "scenarios",
+    "runs"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "chrome": {
+      "type": "string"
+    },
+    "samples_per_scenario": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "measurement": {
+      "type": "object"
+    },
+    "scenarios": {
+      "type": "object",
+      "required": ["attach_single_task", "isolated_single_task"],
+      "properties": {
+        "attach_single_task": {
+          "$ref": "#/$defs/scenario"
+        },
+        "isolated_single_task": {
+          "$ref": "#/$defs/scenario"
+        }
+      }
+    },
+    "runs": {
+      "type": "object",
+      "required": ["attach_single_task", "isolated_single_task"],
+      "properties": {
+        "attach_single_task": {
+          "$ref": "#/$defs/runs"
+        },
+        "isolated_single_task": {
+          "$ref": "#/$defs/runs"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "durationSummary": {
+      "type": "object",
+      "required": ["samples", "p50_ms", "p95_ms", "p99_ms", "min_ms", "max_ms"],
+      "properties": {
+        "samples": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "p50_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p99_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "min_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_ms": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "countSummary": {
+      "type": "object",
+      "required": ["samples", "p50", "p95", "p99", "min", "max"],
+      "properties": {
+        "samples": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "p50": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p99": {
+          "type": "number",
+          "minimum": 0
+        },
+        "min": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "required": [
+        "samples",
+        "warm_samples",
+        "cold_run",
+        "task_total_ms",
+        "attach_ms",
+        "first_action_dispatch_ms",
+        "flow_ms",
+        "session_stop_ms",
+        "cli_process_count",
+        "rpc_count",
+        "snapshot_request_count",
+        "full_ax_tree_calls",
+        "cdp_calls",
+        "baseline_p95_ms",
+        "regression_limit_p95_ms"
+      ],
+      "properties": {
+        "samples": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "warm_samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cold_run": {
+          "$ref": "#/$defs/run"
+        },
+        "task_total_ms": {
+          "$ref": "#/$defs/durationSummary"
+        },
+        "attach_ms": {
+          "$ref": "#/$defs/durationSummary"
+        },
+        "first_action_dispatch_ms": {
+          "$ref": "#/$defs/durationSummary"
+        },
+        "flow_ms": {
+          "$ref": "#/$defs/durationSummary"
+        },
+        "session_stop_ms": {
+          "$ref": "#/$defs/durationSummary"
+        },
+        "cli_process_count": {
+          "$ref": "#/$defs/countSummary"
+        },
+        "rpc_count": {
+          "$ref": "#/$defs/countSummary"
+        },
+        "snapshot_request_count": {
+          "$ref": "#/$defs/countSummary"
+        },
+        "full_ax_tree_calls": {
+          "$ref": "#/$defs/countSummary"
+        },
+        "cdp_calls": {
+          "$ref": "#/$defs/countSummary"
+        },
+        "snapshot_cache_hit_rate": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "locator_cache_hit_rate": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "overlay_cache_hit_rate": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "baseline_p95_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "regression_limit_p95_ms": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/run"
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "temperature",
+        "mode",
+        "task_total_ms",
+        "attach_ms",
+        "first_action_dispatch_ms",
+        "flow_ms",
+        "session_stop_ms",
+        "cli_process_count",
+        "rpc_count",
+        "flow_count",
+        "flow_step_count",
+        "snapshot_request_count",
+        "full_ax_tree_calls",
+        "cdp_calls",
+        "locator_cache_hit_rate",
+        "snapshot_cache_hit_rate",
+        "overlay_cache_hit_rate"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "temperature": {
+          "enum": ["cold", "warm"]
+        },
+        "mode": {
+          "enum": ["attach", "isolated"]
+        },
+        "task_total_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "attach_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "first_action_dispatch_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "flow_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "session_stop_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cli_process_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rpc_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "flow_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flow_step_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "snapshot_request_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "full_ax_tree_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cdp_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "locator_cache_hit_rate": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "snapshot_cache_hit_rate": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "overlay_cache_hit_rate": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    }
+  }
+}

@@ -19,6 +19,7 @@ function fakeAgentWindow() {
 
 function fakeCdp(handlers: Record<string, (params?: object) => unknown>): CdpRunner {
   return {
+    runtimeCounters: {},
     send: vi.fn(async (_tabId: number, method: string, params?: object) => {
       const handler = handlers[method];
       if (!handler) throw new Error(`unexpected CDP call ${method}`);
@@ -126,10 +127,18 @@ describe("resolveLocator strict matching", () => {
     await resolveLocator(cdp, ctx, 4, { css: "#save" });
     await resolveLocator(cdp, ctx, 4, { css: "#save" });
     expect(cdp.send).toHaveBeenCalledTimes(5);
+    expect(cdp.runtimeCounters).toMatchObject({
+      locator_cache_hits: 1,
+      locator_cache_misses: 1,
+    });
 
     version = 2;
     await resolveLocator(cdp, ctx, 4, { css: "#save" });
     expect(cdp.send).toHaveBeenCalledTimes(9);
+    expect(cdp.runtimeCounters).toMatchObject({
+      locator_cache_hits: 1,
+      locator_cache_misses: 2,
+    });
   });
 
   it("returns not_found for zero matches", async () => {

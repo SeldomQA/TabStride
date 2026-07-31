@@ -23,6 +23,19 @@ baseline. A regression greater than 15% fails:
 pnpm perf:chrome
 ```
 
+Run the complete single-task baseline. It measures both attach and isolated
+paths as `session start → snapshot → flow → snapshot → session stop`, assigns
+one stable `run_id` to every RPC in the task, and reports CLI/RPC/Snapshot/AX
+counts together with cold/warm latency:
+
+```bash
+pnpm perf:task
+```
+
+The report is written to `artifacts/single-task-performance.json` and follows
+`tests/e2e/actionability/task-performance-report.schema.json`. Its P95 is
+compared with `task-performance-baseline.json` using the same 15% threshold.
+
 Run both:
 
 ```bash
@@ -36,4 +49,5 @@ standard location. Pass `--headed` directly to
 The scenario page covers delayed insertion, disabled-to-enabled transitions,
 continuous movement, temporary obstruction, DOM replacement, strict
 multi-match errors, structured timeout evidence, the in-page user Stop
-control, attach-tab scope isolation, and CLI/Flow parity.
+control, attach-tab scope isolation, CLI/Flow parity, and a deterministic form
+creation task.

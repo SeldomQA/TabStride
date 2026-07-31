@@ -74,6 +74,10 @@ pub struct GlobalFlags {
     /// Print the end-to-end request timing breakdown to stderr.
     #[arg(long, global = true)]
     pub timing: bool,
+
+    /// Correlate every command in one user task under a stable metrics id.
+    #[arg(long, global = true)]
+    pub run_id: Option<String>,
 }
 
 /// Top-level `tabstride` CLI.

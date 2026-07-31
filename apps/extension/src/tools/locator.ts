@@ -4,7 +4,7 @@ import { readDocumentIdentity, sameDocument } from "@/session-manager/document-c
 import type { SessionContext } from "@/session-manager/manager";
 import type { Locator, RpcError } from "@/transport/types";
 import { rpcError } from "./errors";
-import { type CdpRunner, isRpcError } from "./shared";
+import { type CdpRunner, incrementRuntimeCounter, isRpcError } from "./shared";
 import { resolveSnapshotRef } from "./snapshot-ref";
 
 export interface ResolvedLocator {
@@ -90,8 +90,10 @@ export async function resolveLocator(
   if (document) {
     const cached = ctx.documentCache.locators.get(cacheKey);
     if (cached && sameDocument(cached.document, document)) {
+      incrementRuntimeCounter(cdp, "locator_cache_hits");
       return cached.value as ResolvedLocator | RpcError;
     }
+    incrementRuntimeCounter(cdp, "locator_cache_misses");
   }
   const result = target.css
     ? await resolveCss(cdp, tabId, target)

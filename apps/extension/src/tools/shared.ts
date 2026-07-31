@@ -9,7 +9,12 @@
 import type { DialogCursor } from "@/browser-driver/chromium-cdp";
 import type { SessionContext, SessionManager } from "@/session-manager/manager";
 import { normaliseRef } from "@/session-manager/ref-store";
-import type { ConsoleResult, JavaScriptDialogInfo, RpcError } from "@/transport/types";
+import type {
+  ConsoleResult,
+  JavaScriptDialogInfo,
+  RpcError,
+  RuntimeCounters,
+} from "@/transport/types";
 import { rpcError } from "./errors";
 
 /**
@@ -39,6 +44,7 @@ export type { DialogCursor };
  */
 export interface CdpRunner {
   send<T = unknown>(tabId: number, method: string, params?: object): Promise<T>;
+  runtimeCounters?: RuntimeCounters;
   trackSessionTab?(sessionId: string, tabId: number): void;
   onEvent?(handler: (source: chrome.debugger.Debuggee, method: string, params: unknown) => void): {
     dispose(): void;
@@ -53,6 +59,11 @@ export interface CdpRunner {
     maxTextChars: number,
     includeStack: boolean,
   ): ConsoleResult;
+}
+
+export function incrementRuntimeCounter(cdp: CdpRunner, counter: keyof RuntimeCounters): void {
+  if (!cdp.runtimeCounters) return;
+  cdp.runtimeCounters[counter] = (cdp.runtimeCounters[counter] ?? 0) + 1;
 }
 
 /**
