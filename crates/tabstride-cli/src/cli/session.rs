@@ -1,9 +1,10 @@
 //! `tabstride session start|stop|list` — session lifecycle commands (M5).
 //!
-//! Each subcommand auto-spawns the daemon (via [`ensure_daemon`]) and
-//! issues a typed RPC over the JSON-line IPC transport. Output is
-//! human-readable by default; pass the global `--json` flag to get
-//! structured JSON instead.
+//! Each subcommand discovers the explicitly started `tabstride serve` process
+//! (via [`ensure_daemon`]) and issues a typed RPC over the JSON-line IPC
+//! transport. It never sends a diagnostic preflight or starts a background
+//! service. Output is human-readable by default; pass the global `--json` flag
+//! to get structured JSON instead.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -145,10 +146,7 @@ struct ListReply {
 pub fn dispatch(cmd: SessionCmd, format: Format) -> Result<(), CliError> {
     let info = ensure_daemon().context("ensure daemon is running")?;
     match cmd.sub {
-        SessionSub::Start(args) => {
-            run_skill_sync_for_session_start(format);
-            run_start(info.sock_path, args, format)
-        }
+        SessionSub::Start(args) => run_start(info.sock_path, args, format),
         SessionSub::Stop(args) => run_stop(info.sock_path, args, format),
         SessionSub::List => run_list(info.sock_path, format),
     }
@@ -509,33 +507,6 @@ where
     R: serde::de::DeserializeOwned + Send + 'static,
 {
     crate::cli::business_rpc::call::<P, R>(sock, "session", method, params, timeout)
-}
-
-/// Best-effort: bring installed agent skills up to date with the
-/// bundled `SKILL.md`. Runs on every `tabstride session start` because that
-/// is the user's main "I'm about to use tabstride" entry point.
-///
-/// Errors are logged via `tracing::warn!` and never block the session.
-/// Per-harness `up_to_date` outcomes intentionally produce no output.
-/// In `Format::Json` mode the user-facing `≈ skill updated …` line is
-/// suppressed to keep stderr machine-quiet for harnesses parsing it.
-fn run_skill_sync_for_session_start(format: Format) {
-    let home = match crate::skill_install::harness::home_dir() {
-        Ok(home) => home,
-        Err(err) => {
-            tracing::warn!(error = %err, "skill sync skipped: cannot resolve $HOME");
-            return;
-        }
-    };
-    let report = crate::skill_install::sync::sync_installed_skills(&home);
-    if matches!(format, Format::Human) {
-        for harness in &report.updated {
-            eprintln!("≈ skill updated for {}", harness.cli_name());
-        }
-    }
-    for (harness, msg) in &report.errors {
-        tracing::warn!(harness = harness.cli_name(), error = %msg, "skill sync failed");
-    }
 }
 
 #[cfg(test)]

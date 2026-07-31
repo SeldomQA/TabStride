@@ -135,6 +135,75 @@ fn business_command_sends_no_status_preflight() {
 }
 
 #[test]
+fn attach_session_start_is_the_first_rpc_without_diagnostic_preflight() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("tabstride");
+    let run_dir = home.join("run");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    let sock = run_dir.join("daemon.sock");
+    let listener = UnixListener::bind(&sock).unwrap();
+
+    let daemon_info = DaemonInfo::now(
+        std::process::id(),
+        sock.clone(),
+        52800,
+        env!("CARGO_PKG_VERSION"),
+    );
+    info::write_to_path(&daemon_info, &home.join("daemon.json")).unwrap();
+
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut line = String::new();
+        BufReader::new(stream.try_clone().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let request: Frame = serde_json::from_str(line.trim_end()).unwrap();
+        let Frame::Request(request) = request else {
+            panic!("expected request frame");
+        };
+        assert_eq!(
+            request.method,
+            Method::SessionStart,
+            "attach fast path must send session.start first, not status, doctor, or browser.list"
+        );
+
+        let response = Frame::Response(ResponseFrame {
+            id: request.id,
+            body: ResponseBody::Ok(serde_json::json!({
+                "session_id": "fast",
+                "browser_instance_id": "chrome-fast",
+                "agent_window_id": null,
+                "attached_tab_id": 77,
+            })),
+        });
+        serde_json::to_writer(&mut stream, &response).unwrap();
+        stream.write_all(b"\n").unwrap();
+        stream.flush().unwrap();
+    });
+
+    let output = Command::new(tabstride_bin())
+        .args([
+            "--json", "session", "start", "--mode", "attach", "--tab", "active",
+        ])
+        .env("TABSTRIDE_HOME", &home)
+        .env("RUST_LOG", "warn")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "attach session start failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let reply: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(reply["session_id"], "fast");
+    assert_eq!(reply["attached_tab_id"], 77);
+    server.join().unwrap();
+}
+
+#[test]
 fn business_command_requires_explicit_service_start() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path().join("tabstride");

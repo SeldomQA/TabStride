@@ -32,6 +32,26 @@ Drive the user's **real Chromium browser** (with their logins and cookies) throu
 2. tabstride **extension** loaded in Chromium and connected (popup shows green)
 3. `tabstride serve` running visibly in a separate terminal; business commands never auto-start it
 
+## Fast path: no diagnostic preflight
+
+For a normal automation request, the first service command must be the intended
+`tabstride session start`. Do **not** run `tabstride status`, `tabstride doctor`,
+`tabstride browsers`, `tabstride session list`, or `tabstride tab list` first to check whether
+TabStride is ready. Attempt the requested attach or isolated session directly.
+
+Use the structured `session start` failure instead of a separate discovery request:
+
+- Service not running: ask the user to start `tabstride serve`.
+- No browser connected: ask the user to connect the extension, then retry only after confirmation.
+- Multiple browsers online: read the candidates included in the error, select one with
+  `--browser <instance-id-or-label>` when the user's intent is unambiguous, otherwise ask which
+  browser to use. Do not call `tabstride browsers` to retrieve the same list again.
+- Unexpected session or browser failure: only then use `status`, followed by `doctor` if the
+  status output is insufficient.
+
+Diagnostics are failure recovery tools. Run them before `session start` only when the user
+explicitly asked to inspect or diagnose TabStride itself.
+
 ## Mandatory workflow
 
 Every automation task **must** follow this lifecycle. Do **not** rely on idle timeouts (default session idle is 5 minutes).
@@ -51,7 +71,8 @@ Choose the session mode from the user's intent:
 - **Isolated (default):** `tabstride session start` opens a dedicated Agent Window.
 - **Attach:** `tabstride session start --mode attach --tab active` controls the active tab in the current user window without creating or moving a window/tab. Use `--tab-id <id>` instead of `--tab active` only when the user has identified a specific tab id.
 
-Optional: add `--browser <instance-id>` to either session-start mode when multiple browsers are connected (`tabstride browsers` / error output lists their ids).
+Optional: after `session start` reports multiple connected browsers, retry with
+`--browser <instance-id-or-label>` using a candidate included in that error.
 
 Emergency cleanup: `tabstride session stop --all`.
 
@@ -168,7 +189,10 @@ Command-specific flags (timeouts, `--tab-id`, `--wait-until`, …): **`tabstride
 
 Details and flags: **`tabstride <cmd> --help`**
 
-### Diagnostics
+### Failure-only diagnostics
+
+Do not use these commands as readiness checks for a normal browser task. Use them after a failed
+business/session request, or when the user explicitly requests diagnostics.
 
 | Command | Summary |
 |---------|---------|

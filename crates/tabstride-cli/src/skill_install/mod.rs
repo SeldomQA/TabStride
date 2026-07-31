@@ -295,6 +295,19 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn bundled_skill_forbids_normal_path_diagnostic_preflights() {
+        assert!(DEFAULT_SKILL_MD.contains("## Fast path: no diagnostic preflight"));
+        assert!(DEFAULT_SKILL_MD.contains(
+            "Do **not** run `tabstride status`, `tabstride doctor`,\n`tabstride browsers`"
+        ));
+        assert!(DEFAULT_SKILL_MD.contains("Diagnostics are failure recovery tools."));
+        assert!(
+            DEFAULT_SKILL_MD
+                .contains("Do not call `tabstride browsers` to retrieve the same list again.")
+        );
+    }
+
+    #[test]
     fn install_writes_skill_md() {
         let tmp = TempDir::new().unwrap();
         let home = tmp.path().to_path_buf();

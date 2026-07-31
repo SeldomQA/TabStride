@@ -165,7 +165,7 @@ pub fn info_for(code: ErrorCode) -> RenderInfo {
         ErrorCode::MultipleBrowsersOnline => RenderInfo {
             summary: "multiple browsers are online",
             hint: Some(
-                "use `--browser <instance_id-or-label>` to target a specific browser (run `tabstride browsers` to list online browsers)",
+                "choose a candidate from the connected browser list and retry with `--browser <instance_id-or-label>`",
             ),
             exit_code: 1,
         },

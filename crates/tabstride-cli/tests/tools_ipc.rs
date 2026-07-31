@@ -496,4 +496,3 @@ async fn tool_dispatch_rejects_unknown_session() {
     assert_eq!(err.code, ErrorCode::NotFound);
     handle.shutdown().await;
 }
- 
