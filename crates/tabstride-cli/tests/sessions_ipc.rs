@@ -145,6 +145,7 @@ async fn session_start_stop_round_trip_via_ipc() {
                         let result = SessionStartResult {
                             agent_window_id: Some(4242),
                             attached_tab_id: None,
+                            ..Default::default()
                         };
                         ResponseFrame {
                             id: req.id,
@@ -302,6 +303,7 @@ async fn session_start_waits_for_late_extension_handshake() {
             let result = SessionStartResult {
                 agent_window_id: Some(4242),
                 attached_tab_id: None,
+                ..Default::default()
             };
             let resp = Frame::Response(ResponseFrame {
                 id: req.id,
@@ -446,6 +448,7 @@ async fn session_start_with_browser_instance_id_picks_target() {
                 let result = SessionStartResult {
                     agent_window_id: Some(123),
                     attached_tab_id: None,
+                    ..Default::default()
                 };
                 let reply = ResponseFrame {
                     id: req.id,
@@ -551,6 +554,7 @@ async fn session_start_label_match_picks_target() {
                 let result = SessionStartResult {
                     agent_window_id: Some(456),
                     attached_tab_id: None,
+                    ..Default::default()
                 };
                 let reply = ResponseFrame {
                     id: req.id,
@@ -643,6 +647,12 @@ async fn session_window_closed_event_purges_session() {
         mode: tabstride_protocol::tools::SessionMode::Isolated,
         attached_tab_id: None,
         created_at_ms: 0,
+        initial_url: None,
+        initial_title: None,
+        initial_document_version: None,
+        initial_snapshot_text: None,
+        initial_snapshot_ref_count: 0,
+        initial_snapshot_truncated: false,
     };
     state.sessions.insert(session);
     assert_eq!(state.sessions.len(), 1);
@@ -682,6 +692,12 @@ async fn browser_disconnect_purges_sessions() {
         mode: tabstride_protocol::tools::SessionMode::Isolated,
         attached_tab_id: None,
         created_at_ms: 0,
+        initial_url: None,
+        initial_title: None,
+        initial_document_version: None,
+        initial_snapshot_text: None,
+        initial_snapshot_ref_count: 0,
+        initial_snapshot_truncated: false,
     };
     state.sessions.insert(session);
     assert_eq!(state.sessions.len(), 1);
@@ -714,6 +730,12 @@ async fn session_stop_self_heals_when_extension_reports_not_found() {
         mode: tabstride_protocol::tools::SessionMode::Isolated,
         attached_tab_id: None,
         created_at_ms: 1,
+        initial_url: None,
+        initial_title: None,
+        initial_document_version: None,
+        initial_snapshot_text: None,
+        initial_snapshot_ref_count: 0,
+        initial_snapshot_truncated: false,
     };
     state.sessions.insert(session);
     state
@@ -816,6 +838,12 @@ async fn reconnect_with_same_instance_id_does_not_clobber_new_browser() {
         mode: tabstride_protocol::tools::SessionMode::Isolated,
         attached_tab_id: None,
         created_at_ms: 1,
+        initial_url: None,
+        initial_title: None,
+        initial_document_version: None,
+        initial_snapshot_text: None,
+        initial_snapshot_ref_count: 0,
+        initial_snapshot_truncated: false,
     };
     state.sessions.insert(session);
     assert_eq!(state.sessions.len(), 1);
@@ -890,4 +918,243 @@ async fn reserve_id_loops_until_vacant_and_caps_attempts() {
     // Cancelling makes the slot vacant again.
     registry.cancel_reservation(&first);
     assert_eq!(registry.len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// A-2: merged attach+snapshot — session.start returns initial page state
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn session_start_with_snapshot_returns_initial_page_state() {
+    let (handle, sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    let _ = handshake_as_ext(&mut ws).await;
+    let ws = Arc::new(tokio::sync::Mutex::new(ws));
+    let ws_clone = Arc::clone(&ws);
+    let responder = tokio::spawn(async move {
+        loop {
+            let next = {
+                let mut g = ws_clone.lock().await;
+                g.next().await
+            };
+            let msg = match next {
+                Some(Ok(m)) => m,
+                _ => break,
+            };
+            let text = match msg {
+                Message::Text(t) => t,
+                Message::Close(_) => break,
+                _ => continue,
+            };
+            let frame: Frame = serde_json::from_str(&text).unwrap();
+            if let Frame::Request(req) = frame {
+                let reply = match req.method {
+                    Method::ToolSessionStart => {
+                        let params: SessionStartParams =
+                            serde_json::from_value(req.params.clone().unwrap()).unwrap();
+                        let result = if params.snapshot {
+                            SessionStartResult {
+                                agent_window_id: None,
+                                attached_tab_id: Some(42),
+                                url: Some("https://example.com/page".into()),
+                                title: Some("Example Page".into()),
+                                document_version: Some(7),
+                                snapshot_text: Some(
+                                    "root\n  @e1 heading \"Welcome\"\n  @e2 button \"Submit\"\n"
+                                        .into(),
+                                ),
+                                snapshot_ref_count: 2,
+                                snapshot_truncated: false,
+                            }
+                        } else {
+                            SessionStartResult {
+                                agent_window_id: Some(4242),
+                                attached_tab_id: None,
+                                ..Default::default()
+                            }
+                        };
+                        ResponseFrame {
+                            id: req.id,
+                            body: ResponseBody::Ok(serde_json::to_value(result).unwrap()),
+                        }
+                    }
+                    Method::ToolSessionStop => ResponseFrame {
+                        id: req.id,
+                        body: ResponseBody::Ok(serde_json::json!({})),
+                    },
+                    _ => continue,
+                };
+                let mut g = ws_clone.lock().await;
+                g.send(Message::Text(serde_json::to_string(&reply).unwrap()))
+                    .await
+                    .unwrap();
+            }
+        }
+    });
+
+    let mut ipc = IpcClient::connect(&sock).await.unwrap();
+
+    #[derive(serde::Serialize)]
+    struct StartParams {
+        mode: tabstride_protocol::tools::SessionMode,
+        tab: Option<String>,
+        snapshot: bool,
+    }
+    #[derive(serde::Deserialize, Debug)]
+    struct StartReply {
+        session_id: String,
+        attached_tab_id: Option<i64>,
+        url: Option<String>,
+        title: Option<String>,
+        document_version: Option<u64>,
+        snapshot_text: Option<String>,
+        snapshot_ref_count: u32,
+        snapshot_truncated: bool,
+    }
+
+    // 1. Attach with snapshot → response includes page metadata + snapshot.
+    let start: StartReply = ipc
+        .call(
+            "a2-1",
+            Method::SessionStart,
+            Some(StartParams {
+                mode: tabstride_protocol::tools::SessionMode::Attach,
+                tab: Some("active".into()),
+                snapshot: true,
+            }),
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap()
+        .expect("session.start with snapshot returned error");
+    assert_eq!(start.session_id.len(), 4);
+    assert_eq!(start.attached_tab_id, Some(42));
+    assert_eq!(start.url.as_deref(), Some("https://example.com/page"));
+    assert_eq!(start.title.as_deref(), Some("Example Page"));
+    assert_eq!(start.document_version, Some(7));
+    assert!(start
+        .snapshot_text
+        .as_deref()
+        .unwrap_or("")
+        .contains("@e1 heading \"Welcome\""));
+    assert_eq!(start.snapshot_ref_count, 2);
+    assert!(!start.snapshot_truncated);
+
+    // Clean up.
+    #[derive(serde::Serialize)]
+    struct StopParams {
+        session_id: Option<String>,
+        all: bool,
+    }
+    let _: serde_json::Value = ipc
+        .call(
+            "a2-2",
+            Method::SessionStop,
+            Some(StopParams {
+                session_id: Some(start.session_id),
+                all: false,
+            }),
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap()
+        .expect("session.stop returned error");
+
+    responder.abort();
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn session_start_without_snapshot_omits_page_fields() {
+    let (handle, sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    let _ = handshake_as_ext(&mut ws).await;
+    let ws = Arc::new(tokio::sync::Mutex::new(ws));
+    let ws_clone = Arc::clone(&ws);
+    let responder = tokio::spawn(async move {
+        loop {
+            let next = {
+                let mut g = ws_clone.lock().await;
+                g.next().await
+            };
+            let msg = match next {
+                Some(Ok(m)) => m,
+                _ => break,
+            };
+            let text = match msg {
+                Message::Text(t) => t,
+                Message::Close(_) => break,
+                _ => continue,
+            };
+            let frame: Frame = serde_json::from_str(&text).unwrap();
+            if let Frame::Request(req) = frame {
+                let reply = match req.method {
+                    Method::ToolSessionStart => {
+                        let result = SessionStartResult {
+                            agent_window_id: Some(9999),
+                            attached_tab_id: None,
+                            ..Default::default()
+                        };
+                        ResponseFrame {
+                            id: req.id,
+                            body: ResponseBody::Ok(serde_json::to_value(result).unwrap()),
+                        }
+                    }
+                    Method::ToolSessionStop => ResponseFrame {
+                        id: req.id,
+                        body: ResponseBody::Ok(serde_json::json!({})),
+                    },
+                    _ => continue,
+                };
+                let mut g = ws_clone.lock().await;
+                g.send(Message::Text(serde_json::to_string(&reply).unwrap()))
+                    .await
+                    .unwrap();
+            }
+        }
+    });
+
+    let mut ipc = IpcClient::connect(&sock).await.unwrap();
+
+    #[derive(serde::Serialize)]
+    struct StartParams {}
+    // Without snapshot: snapshot fields should be absent/default.
+    let result: serde_json::Value = ipc
+        .call::<_, serde_json::Value>(
+            "a2-3",
+            Method::SessionStart,
+            Some(StartParams {}),
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap()
+        .expect("session.start returned error");
+    assert!(result.get("session_id").and_then(|v| v.as_str()).is_some());
+    assert_eq!(result.get("url").and_then(|v| v.as_str()), None);
+    assert_eq!(result.get("title").and_then(|v| v.as_str()), None);
+    assert_eq!(result.get("document_version"), None);
+    assert_eq!(result.get("snapshot_text"), None);
+
+    // Clean up.
+    #[derive(serde::Serialize)]
+    struct StopParams {
+        session_id: Option<String>,
+        all: bool,
+    }
+    let _: serde_json::Value = ipc
+        .call(
+            "a2-4",
+            Method::SessionStop,
+            Some(StopParams {
+                session_id: Some(result["session_id"].as_str().unwrap().to_string()),
+                all: false,
+            }),
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap()
+        .expect("session.stop returned error");
+
+    responder.abort();
+    handle.shutdown().await;
 }

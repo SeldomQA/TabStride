@@ -26,14 +26,45 @@ pub struct SessionStartParams {
     pub tab: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tab_id: Option<i64>,
+    /// When `true`, the extension will capture an initial accessibility
+    /// snapshot of the attached/Agent Window tab and return it alongside
+    /// the session metadata so the agent can skip a separate
+    /// `tool.snapshot` round-trip (A-2: merged attach+snapshot).
+    #[serde(default)]
+    pub snapshot: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionStartResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_window_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attached_tab_id: Option<i64>,
+    /// Tab URL at session creation time (only populated when
+    /// `snapshot` was requested).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Tab title at session creation time (only populated when
+    /// `snapshot` was requested).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// CDP document version at session creation time (A-3 prerequisite:
+    /// lets the agent track when a page has changed without a full
+    /// re-snapshot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_version: Option<u64>,
+    /// Indented aria-snapshot text captured during session creation
+    /// (only populated when `snapshot` was requested and the tab has
+    /// a loaded page).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_text: Option<String>,
+    /// Number of `@e<N>` refs registered for this session by the
+    /// initial snapshot.
+    #[serde(default)]
+    pub snapshot_ref_count: u32,
+    /// Whether the initial snapshot was truncated by depth/token caps.
+    #[serde(default)]
+    pub snapshot_truncated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -80,6 +111,7 @@ mod tests {
             mode: SessionMode::Attach,
             tab: Some("active".into()),
             tab_id: None,
+            snapshot: false,
         };
         let encoded = serde_json::to_value(params).unwrap();
         assert_eq!(encoded["mode"], "attach");
@@ -88,8 +120,54 @@ mod tests {
         let result = SessionStartResult {
             agent_window_id: None,
             attached_tab_id: Some(77),
+            url: None,
+            title: None,
+            document_version: None,
+            snapshot_text: None,
+            snapshot_ref_count: 0,
+            snapshot_truncated: false,
         };
         assert_eq!(serde_json::to_value(result).unwrap()["attached_tab_id"], 77);
+    }
+
+    #[test]
+    fn session_start_with_snapshot_round_trips() {
+        let params = SessionStartParams {
+            session_id: "snap".into(),
+            browser_instance_id: None,
+            mode: SessionMode::Attach,
+            tab: Some("active".into()),
+            tab_id: None,
+            snapshot: true,
+        };
+        let encoded = serde_json::to_value(params).unwrap();
+        assert_eq!(encoded["snapshot"], true);
+
+        let result = SessionStartResult {
+            agent_window_id: None,
+            attached_tab_id: Some(42),
+            url: Some("https://example.com".into()),
+            title: Some("Example".into()),
+            document_version: Some(3),
+            snapshot_text: Some("root\n  @e1 heading \"Welcome\"\n".into()),
+            snapshot_ref_count: 1,
+            snapshot_truncated: false,
+        };
+        let encoded = serde_json::to_value(&result).unwrap();
+        assert_eq!(encoded["url"], "https://example.com");
+        assert_eq!(encoded["title"], "Example");
+        assert_eq!(encoded["document_version"], 3);
+        assert_eq!(encoded["snapshot_text"], "root\n  @e1 heading \"Welcome\"\n");
+        assert_eq!(encoded["snapshot_ref_count"], 1);
+    }
+
+    #[test]
+    fn session_start_defaults_snapshot_to_false() {
+        let params: SessionStartParams = serde_json::from_value(json!({
+            "session_id": "abcd"
+        }))
+        .unwrap();
+        assert!(!params.snapshot);
     }
 
     #[test]

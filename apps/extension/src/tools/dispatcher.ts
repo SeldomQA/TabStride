@@ -312,7 +312,13 @@ export class ToolDispatcher {
   ): Promise<unknown | RpcError> {
     switch (req.method) {
       case "tool.session_start":
-        return handleSessionStart(this.sessions, req.params as SessionStartParams);
+        // tabs/windows are intentionally not injected: `handleSessionStart`
+        // falls back to the global `chrome.tabs`/`chrome.windows` when the
+        // deps are absent, and eager access here would throw in tests that
+        // do not stub the `chrome` global.
+        return handleSessionStart(this.sessions, req.params as SessionStartParams, {
+          cdp,
+        });
       case "tool.session_stop":
         return handleSessionStop(this.sessions, req.params as SessionStopParams, {
           cdp,

@@ -725,6 +725,10 @@ struct CliSessionStartParams {
     pub tab: Option<String>,
     #[serde(default)]
     pub tab_id: Option<i64>,
+    /// Request an initial accessibility snapshot alongside session
+    /// creation (A-2: merged attach+snapshot).
+    #[serde(default)]
+    pub snapshot: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -736,6 +740,20 @@ struct CliSessionStartResult {
     pub mode: tabstride_protocol::tools::SessionMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attached_tab_id: Option<i64>,
+    /// A-2: initial page metadata + snapshot (populated when
+    /// `snapshot` was requested).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_text: Option<String>,
+    #[serde(default)]
+    pub snapshot_ref_count: u32,
+    #[serde(default)]
+    pub snapshot_truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -822,6 +840,7 @@ async fn handle_session_start(state: &Arc<DaemonState>, params: Value) -> Result
             mode: tabstride_protocol::tools::SessionMode::Isolated,
             tab: None,
             tab_id: None,
+            snapshot: false,
         }
     } else {
         serde_json::from_value(params).map_err(|err| RpcError {
@@ -839,6 +858,7 @@ async fn handle_session_start(state: &Arc<DaemonState>, params: Value) -> Result
             mode: params.mode,
             tab: params.tab.as_deref(),
             tab_id: params.tab_id,
+            snapshot: params.snapshot,
             connect_wait: state.config.extension_connect_wait,
             timeout: DEFAULT_RPC_TIMEOUT,
         },
@@ -852,6 +872,12 @@ async fn handle_session_start(state: &Arc<DaemonState>, params: Value) -> Result
                 agent_window_id: session.agent_window_id,
                 mode: session.mode,
                 attached_tab_id: session.attached_tab_id,
+                url: session.initial_url,
+                title: session.initial_title,
+                document_version: session.initial_document_version,
+                snapshot_text: session.initial_snapshot_text,
+                snapshot_ref_count: session.initial_snapshot_ref_count,
+                snapshot_truncated: session.initial_snapshot_truncated,
             };
             Ok(serde_json::to_value(result).unwrap_or(Value::Null))
         }
@@ -1249,7 +1275,6 @@ mod windows {
     use std::sync::Arc;
 
     use anyhow::{Context, Result};
-    use serde_json::Value;
     use tabstride_protocol::{ErrorCode, Frame, RequestFrame, ResponseBody, RpcError};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};

@@ -52,6 +52,14 @@ pub struct Session {
     pub mode: SessionMode,
     pub attached_tab_id: Option<i64>,
     pub created_at_ms: i64,
+    /// A-2: initial page metadata + snapshot captured during session
+    /// creation (only populated when `snapshot` was requested).
+    pub initial_url: Option<String>,
+    pub initial_title: Option<String>,
+    pub initial_document_version: Option<u64>,
+    pub initial_snapshot_text: Option<String>,
+    pub initial_snapshot_ref_count: u32,
+    pub initial_snapshot_truncated: bool,
 }
 
 impl Session {
@@ -146,6 +154,12 @@ impl SessionRegistry {
                     mode,
                     attached_tab_id: None,
                     created_at_ms: now_ms_fn(),
+                    initial_url: None,
+                    initial_title: None,
+                    initial_document_version: None,
+                    initial_snapshot_text: None,
+                    initial_snapshot_ref_count: 0,
+                    initial_snapshot_truncated: false,
                 },
             );
             return Some(candidate);
@@ -154,19 +168,30 @@ impl SessionRegistry {
     }
 
     /// Replace a previously [`reserve_id`](Self::reserve_id) placeholder
-    /// with the real `agent_window_id` returned by the extension.
-    /// Returns the resulting [`Session`] for callers that want to echo
-    /// it back.
+    /// with the real data returned by the extension. Returns the
+    /// resulting [`Session`] for callers that want to echo it back.
     pub fn commit_reservation(
         &self,
         session_id: &SessionId,
         agent_window_id: Option<i64>,
         attached_tab_id: Option<i64>,
+        initial_url: Option<String>,
+        initial_title: Option<String>,
+        initial_document_version: Option<u64>,
+        initial_snapshot_text: Option<String>,
+        initial_snapshot_ref_count: u32,
+        initial_snapshot_truncated: bool,
     ) -> Option<Session> {
         let mut guard = self.inner.lock().expect("session registry poisoned");
         let session = guard.get_mut(session_id)?;
         session.agent_window_id = agent_window_id;
         session.attached_tab_id = attached_tab_id;
+        session.initial_url = initial_url;
+        session.initial_title = initial_title;
+        session.initial_document_version = initial_document_version;
+        session.initial_snapshot_text = initial_snapshot_text;
+        session.initial_snapshot_ref_count = initial_snapshot_ref_count;
+        session.initial_snapshot_truncated = initial_snapshot_truncated;
         Some(session.clone())
     }
 
@@ -342,6 +367,9 @@ pub struct StartSessionRequest<'a> {
     pub mode: SessionMode,
     pub tab: Option<&'a str>,
     pub tab_id: Option<i64>,
+    /// Request an initial accessibility snapshot alongside session
+    /// creation (A-2: merged attach+snapshot).
+    pub snapshot: bool,
     pub connect_wait: Duration,
     pub timeout: Duration,
 }
@@ -349,7 +377,19 @@ pub struct StartSessionRequest<'a> {
 fn validate_start_result(
     mode: SessionMode,
     result: SessionStartResult,
-) -> Result<(Option<i64>, Option<i64>), RpcError> {
+) -> Result<
+    (
+        Option<i64>,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<u64>,
+        Option<String>,
+        u32,
+        bool,
+    ),
+    RpcError,
+> {
     let valid = match mode {
         SessionMode::Isolated => {
             result.agent_window_id.is_some() && result.attached_tab_id.is_none()
@@ -363,7 +403,16 @@ fn validate_start_result(
             data: None,
         });
     }
-    Ok((result.agent_window_id, result.attached_tab_id))
+    Ok((
+        result.agent_window_id,
+        result.attached_tab_id,
+        result.url,
+        result.title,
+        result.document_version,
+        result.snapshot_text,
+        result.snapshot_ref_count,
+        result.snapshot_truncated,
+    ))
 }
 
 async fn rollback_extension_session(
@@ -439,6 +488,7 @@ pub async fn start_session(
         mode: request.mode,
         tab: request.tab.map(str::to_owned),
         tab_id: request.tab_id,
+        snapshot: request.snapshot,
     };
     let rpc_id = next_rpc_id("sess-start");
     let frame = RequestFrame {
@@ -469,7 +519,16 @@ pub async fn start_session(
             return Err(StartSessionError::Timeout);
         }
     };
-    let (agent_window_id, attached_tab_id) = match response.body {
+    let (
+        agent_window_id,
+        attached_tab_id,
+        initial_url,
+        initial_title,
+        initial_document_version,
+        initial_snapshot_text,
+        initial_snapshot_ref_count,
+        initial_snapshot_truncated,
+    ) = match response.body {
         ResponseBody::Ok(v) => match serde_json::from_value::<SessionStartResult>(v) {
             Ok(parsed) => match validate_start_result(request.mode, parsed) {
                 Ok(target) => target,
@@ -494,7 +553,17 @@ pub async fn start_session(
         }
     };
     let session = sessions
-        .commit_reservation(&session_id, agent_window_id, attached_tab_id)
+        .commit_reservation(
+            &session_id,
+            agent_window_id,
+            attached_tab_id,
+            initial_url,
+            initial_title,
+            initial_document_version,
+            initial_snapshot_text,
+            initial_snapshot_ref_count,
+            initial_snapshot_truncated,
+        )
         .ok_or_else(|| {
             StartSessionError::ExtensionError(RpcError {
                 code: tabstride_protocol::ErrorCode::ProtocolError,

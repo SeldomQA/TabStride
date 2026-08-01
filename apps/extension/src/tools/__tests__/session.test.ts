@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SessionManager } from "@/session-manager/manager";
 import { handleSessionStart, handleSessionStop } from "../session";
 import { type AgentOverlayResetApi, type ChromeWindowsApi, type TabMutationApi } from "../tabs";
+import type { CdpAxNode, CdpRunner } from "../observation";
 
 function fakeAgentWindow(ids: number[]) {
   let i = 0;
@@ -62,6 +63,202 @@ describe("handleSessionStart attach mode", () => {
     expect(await handleSessionStart(sm, { session_id: "aa11", mode: "attach" })).toMatchObject({
       code: "invalid_params",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A-2: merged attach+snapshot — session_start returns initial page state
+// ---------------------------------------------------------------------------
+
+const AX_TREE: CdpAxNode[] = [
+  {
+    nodeId: "1",
+    childIds: ["2", "3"],
+    role: { type: "role", value: "RootWebArea" },
+    name: { type: "name", value: "Example Page" },
+  },
+  {
+    nodeId: "2",
+    parentId: "1",
+    backendDOMNodeId: 10,
+    role: { type: "role", value: "heading" },
+    name: { type: "name", value: "Welcome" },
+  },
+  {
+    nodeId: "3",
+    parentId: "1",
+    backendDOMNodeId: 11,
+    role: { type: "role", value: "button" },
+    name: { type: "name", value: "Submit" },
+  },
+];
+
+/** Minimal fake CdpRunner that answers AX-tree + document-identity calls. */
+function fakeCdp(axNodes: CdpAxNode[] = AX_TREE, documentVersion = 3, axError?: Error): CdpRunner {
+  const send = vi.fn(async <T>(_tabId: number, method: string): Promise<T> => {
+    if (method === "Accessibility.getFullAXTree" && axError) throw axError;
+    switch (method) {
+      case "Accessibility.enable":
+        return {} as T;
+      case "Accessibility.getFullAXTree":
+        return { nodes: axNodes } as T;
+      case "Runtime.evaluate":
+        return { result: { value: { id: "doc-1", version: documentVersion } } } as T;
+      default:
+        throw new Error(`unexpected CDP method in fake: ${method}`);
+    }
+  }) as CdpRunner["send"];
+  return { send, trackSessionTab: vi.fn() };
+}
+
+describe("handleSessionStart A-2 merged attach+snapshot", () => {
+  it("attach with snapshot=true returns url/title/document_version/snapshot_text in one reply", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const cdp = fakeCdp();
+    const active = {
+      id: 77,
+      windowId: 9,
+      active: true,
+      url: "https://example.com/page",
+      title: "Example Page",
+    } as chrome.tabs.Tab;
+
+    const result = await handleSessionStart(
+      sm,
+      { session_id: "aa11", mode: "attach", tab: "active", snapshot: true },
+      {
+        windows: {
+          getLastFocused: vi.fn(async () => ({ id: 9, tabs: [active] }) as chrome.windows.Window),
+          getAll: vi.fn(async () => []),
+        },
+        tabs: { get: vi.fn(async () => active) },
+        cdp,
+      },
+    );
+
+    expect(result).toEqual({
+      attached_tab_id: 77,
+      url: "https://example.com/page",
+      title: "Example Page",
+      document_version: 3,
+      snapshot_text: expect.stringContaining("@e1 heading \"Welcome\""),
+      snapshot_ref_count: 2,
+      snapshot_truncated: false,
+    });
+    // Initial snapshot refs are registered on the session RefStore so
+    // @e1/@e2 resolve in later interaction commands.
+    const ctx = sm.get("aa11");
+    expect(ctx?.refStore.isEmpty()).toBe(false);
+    expect(ctx?.refStore.resolve("e1", { tabId: 77 })).not.toBeNull();
+  });
+
+  it("attach without snapshot skips CDP entirely and returns only the lease", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const cdp = fakeCdp();
+    const active = { id: 77, windowId: 9, active: true } as chrome.tabs.Tab;
+
+    const result = await handleSessionStart(
+      sm,
+      { session_id: "aa11", mode: "attach", tab: "active" },
+      {
+        windows: {
+          getLastFocused: vi.fn(async () => ({ id: 9, tabs: [active] }) as chrome.windows.Window),
+          getAll: vi.fn(async () => []),
+        },
+        tabs: { get: vi.fn(async () => active) },
+        cdp,
+      },
+    );
+
+    expect(result).toEqual({ attached_tab_id: 77 });
+    expect(cdp.send).not.toHaveBeenCalled();
+  });
+
+  it("attach with snapshot but no CDP degrades to a lease-only reply with cdp_failed", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const active = { id: 77, windowId: 9, active: true } as chrome.tabs.Tab;
+
+    const result = await handleSessionStart(
+      sm,
+      { session_id: "aa11", mode: "attach", tab: "active", snapshot: true },
+      {
+        windows: {
+          getLastFocused: vi.fn(async () => ({ id: 9, tabs: [active] }) as chrome.windows.Window),
+          getAll: vi.fn(async () => []),
+        },
+        tabs: { get: vi.fn(async () => active) },
+      },
+    );
+
+    expect(result).toMatchObject({
+      code: "cdp_failed",
+      attached_tab_id: 77,
+    });
+    expect(sm.has("aa11")).toBe(true);
+  });
+
+  it("isolated session with snapshot=true reads url/title from the agent tab", async () => {
+    const aw = fakeAgentWindow([100]);
+    const sm = new SessionManager({ agentWindow: aw });
+    const cdp = fakeCdp();
+    const agentTab = {
+      id: 100,
+      windowId: 100,
+      active: true,
+      url: "about:blank",
+      title: "",
+    } as chrome.tabs.Tab;
+
+    const result = await handleSessionStart(
+      sm,
+      { session_id: "aa11", snapshot: true },
+      {
+        tabs: { get: vi.fn(async () => agentTab) },
+        cdp,
+      },
+    );
+
+    expect(result).toMatchObject({
+      agent_window_id: 100,
+      url: "about:blank",
+      snapshot_ref_count: 2,
+    });
+    expect(aw.create).toHaveBeenCalled();
+  });
+
+  it("snapshot capture failure is non-fatal and still returns page metadata", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    // AX tree call throws → captureInitialSnapshot degrades to metadata-only.
+    const cdp = fakeCdp(AX_TREE, 3, new Error("CDP exploded"));
+    const active = {
+      id: 77,
+      windowId: 9,
+      active: true,
+      url: "https://example.com/page",
+      title: "Example Page",
+    } as chrome.tabs.Tab;
+
+    const result = await handleSessionStart(
+      sm,
+      { session_id: "aa11", mode: "attach", tab: "active", snapshot: true },
+      {
+        windows: {
+          getLastFocused: vi.fn(async () => ({ id: 9, tabs: [active] }) as chrome.windows.Window),
+          getAll: vi.fn(async () => []),
+        },
+        tabs: { get: vi.fn(async () => active) },
+        cdp,
+      },
+    );
+
+    expect(result).toEqual({
+      attached_tab_id: 77,
+      url: "https://example.com/page",
+      title: "Example Page",
+      document_version: 3,
+    });
+    // Session stays alive so the agent can retry with tool.snapshot.
+    expect(sm.has("aa11")).toBe(true);
   });
 });
 

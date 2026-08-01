@@ -6,6 +6,11 @@ import {
   returnBorrowedTab,
   type TabManagementDeps,
 } from "./tabs";
+import {
+  type CdpRunner,
+  captureFailureSnapshot,
+} from "./observation";
+import { readDocumentIdentity } from "@/session-manager/document-cache";
 
 export interface SessionStartParams {
   session_id: string;
@@ -13,16 +18,33 @@ export interface SessionStartParams {
   mode?: "isolated" | "attach";
   tab?: "active";
   tab_id?: number;
+  /** Request an initial accessibility snapshot + page metadata alongside
+   *  the session creation reply (A-2: merged attach+snapshot). */
+  snapshot?: boolean;
 }
 
 export interface SessionStartResult {
   agent_window_id?: number;
   attached_tab_id?: number;
+  /** Tab URL at session creation time (populated when snapshot requested). */
+  url?: string;
+  /** Tab title at session creation time (populated when snapshot requested). */
+  title?: string;
+  /** CDP document version at session creation time. */
+  document_version?: number;
+  /** Indented aria-snapshot text captured during session creation. */
+  snapshot_text?: string;
+  /** Number of @e<N> refs registered by the initial snapshot. */
+  snapshot_ref_count?: number;
+  /** Whether the initial snapshot was truncated. */
+  snapshot_truncated?: boolean;
 }
 
 export interface SessionStartDeps {
   tabs?: Pick<typeof chrome.tabs, "get">;
   windows?: Pick<typeof chrome.windows, "getLastFocused" | "getAll">;
+  /** CDP runner required when `snapshot` is requested. */
+  cdp?: CdpRunner;
 }
 
 async function resolveAttachTab(
@@ -110,7 +132,9 @@ export interface SessionStopDeps {
  * Handler for `tool.session_start` (called by the daemon over WS).
  *
  * Creates an isolated Agent Window or leases one existing tab in place,
- * then registers a fresh SessionContext.
+ * then registers a fresh SessionContext. When `params.snapshot` is set
+ * the handler also captures an initial accessibility snapshot so the
+ * agent can skip a separate `tool.snapshot` round-trip (A-2).
  */
 export async function handleSessionStart(
   manager: SessionManager,
@@ -162,18 +186,115 @@ export async function handleSessionStart(
         };
       }
       const ctx = manager.startAttached(params.session_id, tab.id, tab.windowId);
-      return { attached_tab_id: ctx.attachedTabId };
+      const snapshot = await captureInitialSnapshot(manager, ctx, tab.id, tab.url, tab.title, params, deps);
+      if ("code" in snapshot) {
+        return { ...snapshot, attached_tab_id: ctx.attachedTabId };
+      }
+      return { attached_tab_id: ctx.attachedTabId, ...snapshot };
     }
     const ctx = await manager.start(params.session_id);
-    return { agent_window_id: ctx.agentWindowId };
+    const snapshot = await captureInitialSnapshot(manager, ctx, ctx.agentWindowId, undefined, undefined, params, deps);
+    if ("code" in snapshot) {
+      // Snapshot failure is non-fatal for isolated sessions (page may
+      // still be loading about:blank). Return the session without
+      // snapshot data so the agent can proceed and take a snapshot
+      // once the page has loaded.
+      return { agent_window_id: ctx.agentWindowId };
+    }
+    return { agent_window_id: ctx.agentWindowId, ...snapshot };
   } catch (err) {
-    // chrome.windows.create / SessionManager failures are not CDP
-    // failures (§4.5 reserves cdp_failed for raw CDP errors). Surface
-    // them as protocol_error so the CLI maps to the right exit code
-    // (review M4/M5 I5).
     return {
       code: "protocol_error",
       message: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Capture initial page metadata + accessibility snapshot for a freshly
+ * created session. Returns empty fields when `params.snapshot` is
+ * `false` or CDP is unavailable (the caller should omit snapshot fields
+ * when no snapshot was requested).
+ */
+async function captureInitialSnapshot(
+  manager: SessionManager,
+  ctx: { sessionId: string },
+  targetId: number,
+  fallbackUrl: string | undefined,
+  fallbackTitle: string | undefined,
+  params: SessionStartParams,
+  deps: SessionStartDeps,
+): Promise<Partial<SessionStartResult> | RpcError> {
+  if (!params.snapshot) {
+    return {};
+  }
+  if (!deps.cdp) {
+    return { code: "cdp_failed", message: "snapshot requested but CDP is unavailable" };
+  }
+  const cdp = deps.cdp;
+  const tabsApi = deps.tabs ?? chrome.tabs;
+
+  // Resolve url / title. For attach mode the caller provides them;
+  // for isolated mode we read from Chrome.
+  let url = fallbackUrl ?? "";
+  let title = fallbackTitle ?? "";
+  let tabId = targetId;
+  if (!fallbackUrl) {
+    try {
+      const tab = await tabsApi.get(targetId);
+      url = tab.url ?? url;
+      title = tab.title ?? title;
+      if (typeof tab.id === "number") tabId = tab.id;
+    } catch {
+      // Non-fatal: proceed without url/title.
+    }
+  }
+
+  // Resolve document version (best-effort).
+  let documentVersion: number | undefined;
+  try {
+    const docId = await readDocumentIdentity(cdp, tabId);
+    if (docId) documentVersion = docId.version;
+  } catch {
+    // Non-fatal.
+  }
+
+  // Capture the accessibility snapshot.
+  const ctxFull = manager.get(ctx.sessionId);
+  if (!ctxFull) {
+    return {
+      url: url || undefined,
+      title: title || undefined,
+      document_version: documentVersion,
+    };
+  }
+
+  try {
+    const snapshot = await captureFailureSnapshot(cdp, ctxFull, tabId, { max_depth: 16 });
+    if ("code" in snapshot) {
+      // Snapshot capture failed; return metadata without snapshot text
+      // so the agent can retry with a dedicated `tool.snapshot` call.
+      console.warn("[tabstride session_start] initial snapshot capture failed", snapshot);
+      return {
+        url: url || undefined,
+        title: title || undefined,
+        document_version: documentVersion,
+      };
+    }
+    return {
+      url: url || undefined,
+      title: title || undefined,
+      document_version: documentVersion,
+      snapshot_text: snapshot.text || undefined,
+      snapshot_ref_count: snapshot.ref_count,
+      snapshot_truncated: snapshot.truncated,
+    };
+  } catch (err) {
+    console.warn("[tabstride session_start] initial snapshot capture threw", err);
+    return {
+      url: url || undefined,
+      title: title || undefined,
+      document_version: documentVersion,
     };
   }
 }

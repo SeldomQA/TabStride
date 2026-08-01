@@ -71,6 +71,19 @@ Choose the session mode from the user's intent:
 - **Isolated (default):** `tabstride session start` opens a dedicated Agent Window.
 - **Attach:** `tabstride session start --mode attach --tab active` controls the active tab in the current user window without creating or moving a window/tab. Use `--tab-id <id>` instead of `--tab active` only when the user has identified a specific tab id.
 
+**Merged attach+snapshot:** When the agent needs to immediately understand the page
+content after attaching, add `--snapshot` to `session start`:
+
+```
+tabstride session start --mode attach --tab active --snapshot
+```
+
+This returns the session id AND the initial accessibility snapshot in a single round-trip
+(no separate `tabstride snapshot` call needed). The response includes `url`, `title`,
+`document_version`, `snapshot_text`, `snapshot_ref_count`, and `snapshot_truncated`.
+The snapshot uses the same `@eN` ref system as `tool.snapshot`; refs are immediately usable
+in subsequent `click`, `fill`, and other interaction commands.
+
 Optional: after `session start` reports multiple connected browsers, retry with
 `--browser <instance-id-or-label>` using a candidate included in that error.
 
@@ -135,6 +148,11 @@ step and the rest of the Flow.
 Write operations affect only the current session target: an Agent Window tab in isolated mode, or the single leased tab in attach mode.
 
 ```
+# Fastest path: attach + initial snapshot in one round-trip
+tabstride session start --mode attach --tab active --snapshot
+# → returns session_id, url, title, document_version, snapshot_text with @eN refs
+
+# Traditional path: separate snapshot after session start
 tabstride navigate <url> --session <id>
 tabstride snapshot --session <id>          → aria tree with @e1, @e2, … refs
 tabstride click @e3 --session <id>          → or tabstride fill, tabstride select, tabstride press
@@ -213,6 +231,7 @@ business/session request, or when the user explicitly requests diagnostics.
 |---------|---------|
 | `tabstride session start` | Start an isolated Agent Window session; prints **4-letter session id** |
 | `tabstride session start --mode attach --tab active` | Lease the current active user tab in place; `--tab-id <id>` targets a known tab id |
+| `tabstride session start --mode attach --tab active --snapshot` | Lease + capture initial page snapshot in one round-trip (A-2) |
 | `tabstride session stop <id>` | End session; close isolated window or release attach tab; auto-return borrowed tabs |
 | `tabstride session stop --all` | Stop every active session |
 | `tabstride session list` | List active sessions |

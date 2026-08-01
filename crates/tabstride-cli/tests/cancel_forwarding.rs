@@ -209,6 +209,7 @@ async fn cancel_forwards_to_extension_when_tool_is_inflight() {
                         let result = SessionStartResult {
                             agent_window_id: Some(1),
                             attached_tab_id: None,
+                            ..Default::default()
                         };
                         let reply = ResponseFrame {
                             id: req.id,
@@ -433,6 +434,7 @@ async fn cancel_arriving_during_promote_critical_section_keeps_request_cancel_in
                         let result = SessionStartResult {
                             agent_window_id: Some(1),
                             attached_tab_id: None,
+                            ..Default::default()
                         };
                         let reply = ResponseFrame {
                             id: req.id,
@@ -629,6 +631,7 @@ async fn concurrent_tool_call_returns_session_busy_while_slow_rpc_inflight() {
                         let result = SessionStartResult {
                             agent_window_id: Some(1),
                             attached_tab_id: None,
+                            ..Default::default()
                         };
                         let reply = ResponseFrame {
                             id: req.id,

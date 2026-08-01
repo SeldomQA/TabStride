@@ -58,6 +58,12 @@ pub struct SessionStartArgs {
     /// Explicit existing Chrome tab id for attach mode.
     #[arg(long, conflicts_with = "tab")]
     pub tab_id: Option<i64>,
+
+    /// Capture an initial accessibility snapshot during session creation
+    /// so the agent can skip a separate `tool.snapshot` round-trip
+    /// (A-2: merged attach+snapshot).
+    #[arg(long)]
+    pub snapshot: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
@@ -101,9 +107,11 @@ struct StartParams {
     tab: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tab_id: Option<i64>,
+    #[serde(default)]
+    snapshot: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct StartReply {
     session_id: String,
     browser_instance_id: String,
@@ -111,6 +119,18 @@ struct StartReply {
     agent_window_id: Option<i64>,
     #[serde(default)]
     attached_tab_id: Option<i64>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    document_version: Option<u64>,
+    #[serde(default)]
+    snapshot_text: Option<String>,
+    #[serde(default)]
+    snapshot_ref_count: u32,
+    #[serde(default)]
+    snapshot_truncated: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -163,6 +183,7 @@ fn run_start(sock: PathBuf, args: SessionStartArgs, format: Format) -> Result<()
             mode,
             tab: args.tab.map(|_| "active".to_string()),
             tab_id: args.tab_id,
+            snapshot: args.snapshot,
         }),
         Duration::from_secs(30),
     );
@@ -184,20 +205,48 @@ fn run_start(sock: PathBuf, args: SessionStartArgs, format: Format) -> Result<()
             }
             match format {
                 Format::Json => {
+                    let mut obj = serde_json::json!({
+                        "session_id": reply.session_id,
+                        "browser_instance_id": reply.browser_instance_id,
+                        "agent_window_id": reply.agent_window_id,
+                        "attached_tab_id": reply.attached_tab_id,
+                        "mode": mode,
+                    });
+                    if args.snapshot {
+                        if let Some(ref url) = reply.url {
+                            obj["url"] = serde_json::json!(url);
+                        }
+                        if let Some(ref title) = reply.title {
+                            obj["title"] = serde_json::json!(title);
+                        }
+                        if let Some(dv) = reply.document_version {
+                            obj["document_version"] = serde_json::json!(dv);
+                        }
+                        if let Some(ref text) = reply.snapshot_text {
+                            obj["snapshot_text"] = serde_json::json!(text);
+                        }
+                        obj["snapshot_ref_count"] = serde_json::json!(reply.snapshot_ref_count);
+                        obj["snapshot_truncated"] = serde_json::json!(reply.snapshot_truncated);
+                    }
                     println!(
                         "{}",
-                        serde_json::to_string_pretty(&serde_json::json!({
-                            "session_id": reply.session_id,
-                            "browser_instance_id": reply.browser_instance_id,
-                            "agent_window_id": reply.agent_window_id,
-                            "attached_tab_id": reply.attached_tab_id,
-                            "mode": mode,
-                        }))
-                        .map_err(|e| CliError::Local(anyhow::anyhow!(e)))?
+                        serde_json::to_string_pretty(&obj)
+                            .map_err(|e| CliError::Local(anyhow::anyhow!(e)))?
                     );
                 }
                 Format::Human => {
                     println!("{}", reply.session_id);
+                    if args.snapshot {
+                        if let Some(ref url) = reply.url {
+                            println!("  url: {url}");
+                        }
+                        if let Some(ref title) = reply.title {
+                            println!("  title: {title}");
+                        }
+                        if reply.snapshot_text.is_some() {
+                            println!("  snapshot: {} refs", reply.snapshot_ref_count);
+                        }
+                    }
                 }
             }
         }
@@ -522,6 +571,7 @@ mod i3_tests {
             browser_instance_id: "browser".into(),
             agent_window_id: Some(9),
             attached_tab_id: None,
+            ..Default::default()
         };
         assert!(start_reply_matches_mode(SessionMode::Isolated, &isolated));
         assert!(!start_reply_matches_mode(SessionMode::Attach, &isolated));
@@ -531,6 +581,7 @@ mod i3_tests {
             browser_instance_id: "browser".into(),
             agent_window_id: None,
             attached_tab_id: Some(77),
+            ..Default::default()
         };
         assert!(start_reply_matches_mode(SessionMode::Attach, &attached));
         assert!(!start_reply_matches_mode(SessionMode::Isolated, &attached));
