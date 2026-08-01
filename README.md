@@ -206,6 +206,10 @@ or bounded geometry checks while the target's actionability state changes.
 Timeout errors include machine-readable `reason`, `failed_check`, `elapsed_ms`, and `last_state`
 fields when using `--json`.
 
+Every `click`, `fill`, `press`, and `select` result also includes `document_changed` (boolean) and
+`document_version` (integer) so the agent can skip redundant snapshots: when `document_changed` is
+`false`, current snapshot refs remain valid and no re-snapshot is needed before the next interaction.
+
 ### Assert page state with Auto Wait
 
 `tabstride assert` retries page state until it passes or reaches `--timeout`. Element assertions
@@ -268,7 +272,9 @@ tabstride flow run examples/flows/todomvc.yaml --session "$session_id" --var tas
 Flow v1 supports `navigate`, `click`, `fill`, `press`, `select`, `wait_for`, `request_help`,
 `assert`, `snapshot`, and daemon-side `wait_ms` steps.
 Steps run in order through the same session queue as individual CLI commands; the first failure
-stops the flow and reports the failed step plus completed-step timings. A total `timeout` and each
+stops the flow and reports the failed step plus completed-step timings. Each completed step includes
+a `timing` breakdown (`queue_us`, `websocket_us`, `extension_us`, `cdp_us`) for diagnosing slow
+steps; use `--format json` to inspect it. A total `timeout` and each
 tool's `timeout_ms` are independent, and Ctrl+C cancels the active step and the remaining flow.
 Flow targets use the same Locator object and execution path as individual commands. For example,
 `target: { role: button, name: Save, exact: true }` has identical matching, errors, scope, and

@@ -180,6 +180,10 @@ tabstride select --test-id country --value SG --session "$session_id"
 `--json` 时，超时错误包含 `reason`、`failed_check`、`elapsed_ms` 和 `last_state`
 等机器可读字段。
 
+每个 `click`、`fill`、`press`、`select` 的结果还包含 `document_changed`（布尔）和
+`document_version`（整数），供 Agent 跳过多余的 Snapshot：当 `document_changed` 为
+`false` 时，当前 Snapshot ref 仍然有效，下一次交互前无需重新获取快照。
+
 ### 使用 Auto Wait 断言页面状态
 
 `tabstride assert` 会持续重试页面状态，直到断言成立或达到 `--timeout`。元素断言支持
@@ -238,7 +242,8 @@ tabstride flow run examples/flows/todomvc.yaml --session "$session_id" --var tas
 Flow v1 支持 `navigate`、`click`、`fill`、`press`、`select`、`wait_for`、
 `request_help`、`assert`、`snapshot` 和 daemon 本地的 `wait_ms`。
 所有步骤按顺序复用单条命令使用的同一个 Session 队列；第一步失败后立即停止，并返回失败步骤及已完成
-步骤的耗时。Flow 总 `timeout` 与各工具的 `timeout_ms` 独立生效，Ctrl+C 会取消当前步骤和剩余 Flow。
+步骤的耗时。每个已完成步骤包含 `timing` 分阶段耗时（`queue_us`、`websocket_us`、
+`extension_us`、`cdp_us`），用于诊断慢步骤；使用 `--format json` 查看。Flow 总 `timeout` 与各工具的 `timeout_ms` 独立生效，Ctrl+C 会取消当前步骤和剩余 Flow。
 Flow 与单条 CLI 命令使用相同的 Locator 对象和执行路径。例如
 `target: { role: button, name: 保存, exact: true }` 的匹配规则、错误、作用域和超时行为完全一致。
 
