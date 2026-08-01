@@ -89,15 +89,70 @@ Optional: after `session start` reports multiple connected browsers, retry with
 
 Emergency cleanup: `tabstride session stop --all`.
 
-## Persistent client
+## Execution path selection
 
-Use `tabstride client` for genuinely adaptive, non-Flow work when the harness can keep a child
-process alive. Do not choose it over a Flow for a deterministic sequence. It accepts one protocol
-request per stdin line, writes one correlated response per stdout line, and keeps a single
-authenticated WebSocket connection to the running service. Pipeline requests only when their
-dependencies allow it; always preserve response IDs. Closing the client cancels its in-flight work
-and stops sessions it created, but still send an explicit `session.stop` in the normal
-success/error cleanup path.
+After session start, choose one of two execution paths:
+
+| Criterion | Deterministic (Flow) | Adaptive (persistent client) |
+|-----------|---------------------|------------------------------|
+| Steps known in advance? | Yes — all actions are predetermined | No — next action depends on page response |
+| Intermediate inspection needed? | No | Yes — must read result before deciding next step |
+| Typical examples | Fill a known form, create a Todo, run regression steps | Explore an unknown UI, multi-step wizard with branching, debug a failing flow |
+| Process model | One `tabstride flow run` process | One long-lived `tabstride client` process |
+| Minimum round-trips | 1 (the Flow) | N (one per decision point) |
+
+**Decision rule:** If the task has two or more known Flow-supported actions and later steps do
+not depend on inspecting an unknown intermediate result, use Flow. Otherwise use the persistent
+client. When only part of a task is deterministic, batch the contiguous known group into a Flow
+and run the adaptive remainder through the persistent client or individual commands.
+
+Do not spawn one CLI process per action for adaptive work — use the persistent client to keep
+one connection alive across multiple request/response cycles.
+
+## Adaptive execution (persistent client)
+
+Use `tabstride client` when the next action genuinely depends on an unknown preceding result.
+The client keeps one authenticated WebSocket connection to the running service, accepts one
+JSON request frame per stdin line, and writes one correlated response frame per stdout line.
+
+**Lifecycle:**
+
+```
+1. Spawn: tabstride client
+2. Send session.start request (with snapshot:true for unknown pages)
+3. Read response → extract session_id, snapshot_text, document_version
+4. Loop:
+   a. Send interaction request (tool.click / tool.fill / tool.press / …)
+   b. Read response → check document_changed
+      - false → refs still valid, proceed to next action
+      - true  → send tool.snapshot before the next ref-based action
+   c. Decide next action from the result
+5. Send session.stop request
+6. Close stdin (or kill the process) — in-flight work is cancelled
+```
+
+**Protocol example (newline-delimited JSON on stdin/stdout):**
+
+```jsonl
+→ {"id":"1","method":"session.start","params":{"mode":"attach","tab":"active","snapshot":true}}
+← {"id":"1","result":{"session_id":"xkqm","url":"…","snapshot_text":"…","document_version":5,…}}
+→ {"id":"2","method":"tool.click","params":{"session_id":"xkqm","target":{"ref":"@e3"}}}
+← {"id":"2","result":{"tab_id":9,"x":120,"y":40,"document_changed":true,"document_version":6,…}}
+→ {"id":"3","method":"tool.snapshot","params":{"session_id":"xkqm"}}
+← {"id":"3","result":{"snapshot_text":"…","ref_count":42,…}}
+→ {"id":"4","method":"tool.fill","params":{"session_id":"xkqm","target":{"ref":"@e7"},"value":"hello"}}
+← {"id":"4","result":{"tab_id":9,"value_length":5,"document_changed":false,…}}
+→ {"id":"5","method":"session.stop","params":{"session_id":"xkqm"}}
+← {"id":"5","result":{}}
+```
+
+**Rules:**
+
+- Pipeline requests only when their dependencies allow it; always preserve response IDs.
+- Use `document_changed` from interaction results to skip unnecessary snapshots.
+- Closing the client cancels in-flight work and stops sessions it created, but still send an
+  explicit `session.stop` in the normal success/error cleanup path.
+- Do not choose the persistent client over a Flow for a deterministic sequence.
 
 ## Flow-first execution
 
