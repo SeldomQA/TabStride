@@ -173,25 +173,18 @@ impl SessionRegistry {
     pub fn commit_reservation(
         &self,
         session_id: &SessionId,
-        agent_window_id: Option<i64>,
-        attached_tab_id: Option<i64>,
-        initial_url: Option<String>,
-        initial_title: Option<String>,
-        initial_document_version: Option<u64>,
-        initial_snapshot_text: Option<String>,
-        initial_snapshot_ref_count: u32,
-        initial_snapshot_truncated: bool,
+        data: CommittedSessionData,
     ) -> Option<Session> {
         let mut guard = self.inner.lock().expect("session registry poisoned");
         let session = guard.get_mut(session_id)?;
-        session.agent_window_id = agent_window_id;
-        session.attached_tab_id = attached_tab_id;
-        session.initial_url = initial_url;
-        session.initial_title = initial_title;
-        session.initial_document_version = initial_document_version;
-        session.initial_snapshot_text = initial_snapshot_text;
-        session.initial_snapshot_ref_count = initial_snapshot_ref_count;
-        session.initial_snapshot_truncated = initial_snapshot_truncated;
+        session.agent_window_id = data.agent_window_id;
+        session.attached_tab_id = data.attached_tab_id;
+        session.initial_url = data.initial_url;
+        session.initial_title = data.initial_title;
+        session.initial_document_version = data.initial_document_version;
+        session.initial_snapshot_text = data.initial_snapshot_text;
+        session.initial_snapshot_ref_count = data.initial_snapshot_ref_count;
+        session.initial_snapshot_truncated = data.initial_snapshot_truncated;
         Some(session.clone())
     }
 
@@ -374,22 +367,24 @@ pub struct StartSessionRequest<'a> {
     pub timeout: Duration,
 }
 
+/// Validated session fields returned by the extension after a successful
+/// `session.start` round-trip. Passed to
+/// [`SessionRegistry::commit_reservation`] to finalise the placeholder.
+pub struct CommittedSessionData {
+    agent_window_id: Option<i64>,
+    attached_tab_id: Option<i64>,
+    initial_url: Option<String>,
+    initial_title: Option<String>,
+    initial_document_version: Option<u64>,
+    initial_snapshot_text: Option<String>,
+    initial_snapshot_ref_count: u32,
+    initial_snapshot_truncated: bool,
+}
+
 fn validate_start_result(
     mode: SessionMode,
     result: SessionStartResult,
-) -> Result<
-    (
-        Option<i64>,
-        Option<i64>,
-        Option<String>,
-        Option<String>,
-        Option<u64>,
-        Option<String>,
-        u32,
-        bool,
-    ),
-    RpcError,
-> {
+) -> Result<CommittedSessionData, RpcError> {
     let valid = match mode {
         SessionMode::Isolated => {
             result.agent_window_id.is_some() && result.attached_tab_id.is_none()
@@ -403,16 +398,16 @@ fn validate_start_result(
             data: None,
         });
     }
-    Ok((
-        result.agent_window_id,
-        result.attached_tab_id,
-        result.url,
-        result.title,
-        result.document_version,
-        result.snapshot_text,
-        result.snapshot_ref_count,
-        result.snapshot_truncated,
-    ))
+    Ok(CommittedSessionData {
+        agent_window_id: result.agent_window_id,
+        attached_tab_id: result.attached_tab_id,
+        initial_url: result.url,
+        initial_title: result.title,
+        initial_document_version: result.document_version,
+        initial_snapshot_text: result.snapshot_text,
+        initial_snapshot_ref_count: result.snapshot_ref_count,
+        initial_snapshot_truncated: result.snapshot_truncated,
+    })
 }
 
 async fn rollback_extension_session(
@@ -519,16 +514,7 @@ pub async fn start_session(
             return Err(StartSessionError::Timeout);
         }
     };
-    let (
-        agent_window_id,
-        attached_tab_id,
-        initial_url,
-        initial_title,
-        initial_document_version,
-        initial_snapshot_text,
-        initial_snapshot_ref_count,
-        initial_snapshot_truncated,
-    ) = match response.body {
+    let committed = match response.body {
         ResponseBody::Ok(v) => match serde_json::from_value::<SessionStartResult>(v) {
             Ok(parsed) => match validate_start_result(request.mode, parsed) {
                 Ok(target) => target,
@@ -553,17 +539,7 @@ pub async fn start_session(
         }
     };
     let session = sessions
-        .commit_reservation(
-            &session_id,
-            agent_window_id,
-            attached_tab_id,
-            initial_url,
-            initial_title,
-            initial_document_version,
-            initial_snapshot_text,
-            initial_snapshot_ref_count,
-            initial_snapshot_truncated,
-        )
+        .commit_reservation(&session_id, committed)
         .ok_or_else(|| {
             StartSessionError::ExtensionError(RpcError {
                 code: tabstride_protocol::ErrorCode::ProtocolError,

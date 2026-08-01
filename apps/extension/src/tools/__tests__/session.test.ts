@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { SessionManager } from "@/session-manager/manager";
+import type { CdpAxNode, CdpRunner } from "../observation";
 import { handleSessionStart, handleSessionStop } from "../session";
 import { type AgentOverlayResetApi, type ChromeWindowsApi, type TabMutationApi } from "../tabs";
-import type { CdpAxNode, CdpRunner } from "../observation";
 
 function fakeAgentWindow(ids: number[]) {
   let i = 0;
@@ -141,7 +141,7 @@ describe("handleSessionStart A-2 merged attach+snapshot", () => {
       url: "https://example.com/page",
       title: "Example Page",
       document_version: 3,
-      snapshot_text: expect.stringContaining("@e1 heading \"Welcome\""),
+      snapshot_text: expect.stringContaining('@e1 heading "Welcome"'),
       snapshot_ref_count: 2,
       snapshot_truncated: false,
     });

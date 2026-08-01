@@ -1,16 +1,13 @@
+import { readDocumentIdentity } from "@/session-manager/document-cache";
 import type { SessionManager } from "@/session-manager/manager";
 import type { RpcError } from "@/transport/types";
+import { type CdpRunner, captureFailureSnapshot } from "./observation";
 import {
   type AgentOverlayResetApi,
   chromeAgentOverlayResetApi,
   returnBorrowedTab,
   type TabManagementDeps,
 } from "./tabs";
-import {
-  type CdpRunner,
-  captureFailureSnapshot,
-} from "./observation";
-import { readDocumentIdentity } from "@/session-manager/document-cache";
 
 export interface SessionStartParams {
   session_id: string;
@@ -186,14 +183,30 @@ export async function handleSessionStart(
         };
       }
       const ctx = manager.startAttached(params.session_id, tab.id, tab.windowId);
-      const snapshot = await captureInitialSnapshot(manager, ctx, tab.id, tab.url, tab.title, params, deps);
+      const snapshot = await captureInitialSnapshot(
+        manager,
+        ctx,
+        tab.id,
+        tab.url,
+        tab.title,
+        params,
+        deps,
+      );
       if ("code" in snapshot) {
         return { ...snapshot, attached_tab_id: ctx.attachedTabId };
       }
       return { attached_tab_id: ctx.attachedTabId, ...snapshot };
     }
     const ctx = await manager.start(params.session_id);
-    const snapshot = await captureInitialSnapshot(manager, ctx, ctx.agentWindowId, undefined, undefined, params, deps);
+    const snapshot = await captureInitialSnapshot(
+      manager,
+      ctx,
+      ctx.agentWindowId,
+      undefined,
+      undefined,
+      params,
+      deps,
+    );
     if ("code" in snapshot) {
       // Snapshot failure is non-fatal for isolated sessions (page may
       // still be loading about:blank). Return the session without
