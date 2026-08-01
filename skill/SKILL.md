@@ -179,6 +179,10 @@ than a page state.
 Put requested end-state checks in top-level `assertions`; they run only after every action step
 succeeds. Use an inline `assert` only when its result must gate a later action.
 
+Every `flow run` result includes per-step `duration_ms` and a `timing` breakdown
+(`queue_us`, `websocket_us`, `extension_us`, `cdp_us`) when available. Use `--format json` to
+inspect timing for diagnosing slow steps.
+
 Use `request_help` inside a Flow for a captcha, login, confirmation, or another bounded human step.
 Set the Flow's total `timeout` longer than the human step's `timeout_ms`. Continue resumes the Flow;
 Cancel, timeout, or navigation stops it and must be treated as a failed/aborted Flow, never as

@@ -17,6 +17,20 @@
         "$ref": "#/definitions/JavaScriptDialogInfo"
       }
     },
+    "document_changed": {
+      "description": "Whether the page DOM changed as a result of this interaction.",
+      "default": false,
+      "type": "boolean"
+    },
+    "document_version": {
+      "description": "CDP document version after the interaction.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
     "key": {
       "type": "string"
     },

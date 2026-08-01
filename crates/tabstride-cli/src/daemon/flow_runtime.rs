@@ -9,10 +9,11 @@ use serde_json::Value;
 use tabstride_protocol::{
     ErrorCode, FlowAssertEntry, FlowDefinition, FlowFailureData, FlowRunParams, FlowRunResult,
     FlowStep, FlowStepResult, HelpOutcome, Method, RequestHelpResult, ResponseBody, RpcError,
-    RpcId,
+    RpcId, StepTiming,
 };
 
 use super::state::DaemonState;
+use crate::timing::take_trace;
 
 const DEFAULT_FLOW_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_FLOW_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -109,12 +110,21 @@ pub async fn handle_flow_run(
         };
 
         match normalize_step_body(&method, body) {
-            ResponseBody::Ok(output) => completed.push(FlowStepResult {
-                index: index + 1,
-                method: method_name,
-                duration_ms: elapsed_ms(step_started),
-                output,
-            }),
+            ResponseBody::Ok(mut output) => {
+                let timing = take_trace(&mut output).map(|trace| StepTiming {
+                    queue_us: trace.queue_wait_us(),
+                    websocket_us: trace.websocket_us(),
+                    extension_us: trace.extension_dispatch_us(),
+                    cdp_us: trace.cdp_us(),
+                });
+                completed.push(FlowStepResult {
+                    index: index + 1,
+                    method: method_name,
+                    duration_ms: elapsed_ms(step_started),
+                    timing: timing.filter(|t| !t.is_empty()),
+                    output,
+                });
+            }
             ResponseBody::Err(cause) => {
                 return flow_failure(&name, index, &method_name, started, completed, cause);
             }
@@ -447,5 +457,47 @@ mod tests {
             panic!("expected malformed result to fail");
         };
         assert_eq!(error.code, ErrorCode::ProtocolError);
+    }
+
+    #[test]
+    fn extracts_step_timing_from_embedded_trace() {
+        let mut output = serde_json::json!({
+            "tab_id": 9,
+            "__tabstride_timing": {
+                "serve_queue_entered_at": 100,
+                "serve_queue_started_at": 150,
+                "extension_sent_at": 160,
+                "extension_received_at": 200,
+                "cdp_started_at": 210,
+                "cdp_finished_at": 350,
+                "extension_replied_at": 380
+            }
+        });
+        let timing = take_trace(&mut output).map(|trace| StepTiming {
+            queue_us: trace.queue_wait_us(),
+            websocket_us: trace.websocket_us(),
+            extension_us: trace.extension_dispatch_us(),
+            cdp_us: trace.cdp_us(),
+        });
+        let timing = timing.expect("timing should be present");
+        assert_eq!(timing.queue_us, Some(50));
+        assert_eq!(timing.websocket_us, Some(40));
+        assert_eq!(timing.extension_us, Some(180));
+        assert_eq!(timing.cdp_us, Some(140));
+        // The embedded trace is removed from output.
+        assert!(output.get("__tabstride_timing").is_none());
+        assert_eq!(output["tab_id"], 9);
+    }
+
+    #[test]
+    fn step_without_timing_produces_none() {
+        let mut output = serde_json::json!({"tab_id": 3});
+        let timing = take_trace(&mut output).map(|trace| StepTiming {
+            queue_us: trace.queue_wait_us(),
+            websocket_us: trace.websocket_us(),
+            extension_us: trace.extension_dispatch_us(),
+            cdp_us: trace.cdp_us(),
+        });
+        assert!(timing.is_none());
     }
 }

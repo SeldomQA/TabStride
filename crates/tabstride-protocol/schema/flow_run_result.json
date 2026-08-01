@@ -46,7 +46,60 @@
         "method": {
           "type": "string"
         },
-        "output": true
+        "output": true,
+        "timing": {
+          "description": "Full-chain timing breakdown for this step.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StepTiming"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "StepTiming": {
+      "description": "Per-step timing phase breakdown (all values in microseconds).",
+      "type": "object",
+      "properties": {
+        "cdp_us": {
+          "description": "CDP command execution inside the extension.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "extension_us": {
+          "description": "Extension-side processing (receive → reply).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "queue_us": {
+          "description": "Time waiting in the per-session dispatch queue.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "websocket_us": {
+          "description": "WebSocket round-trip to the extension.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
       }
     }
   }

@@ -16,6 +16,20 @@
         "$ref": "#/definitions/JavaScriptDialogInfo"
       }
     },
+    "document_changed": {
+      "description": "Whether the page DOM changed as a result of this interaction (lightweight page-change signal so the agent can skip a full re-snapshot when nothing moved).",
+      "default": false,
+      "type": "boolean"
+    },
+    "document_version": {
+      "description": "CDP document version after the interaction (lets the agent correlate with prior snapshot state).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
     "tab_id": {
       "type": "integer",
       "format": "int64"

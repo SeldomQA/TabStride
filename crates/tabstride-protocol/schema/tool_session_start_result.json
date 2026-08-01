@@ -16,6 +16,48 @@
         "null"
       ],
       "format": "int64"
+    },
+    "document_version": {
+      "description": "CDP document version at session creation time (lets the agent track when a page has changed without a full re-snapshot).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "snapshot_ref_count": {
+      "description": "Number of `@e<N>` refs registered for this session by the initial snapshot.",
+      "default": 0,
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "snapshot_text": {
+      "description": "Indented aria-snapshot text captured during session creation (only populated when `snapshot` was requested and the tab has a loaded page).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "snapshot_truncated": {
+      "description": "Whether the initial snapshot was truncated by depth/token caps.",
+      "default": false,
+      "type": "boolean"
+    },
+    "title": {
+      "description": "Tab title at session creation time (only populated when `snapshot` was requested).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "url": {
+      "description": "Tab URL at session creation time (only populated when `snapshot` was requested).",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   }
 }

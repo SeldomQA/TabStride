@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use clap::{Args, Subcommand};
-use tabstride_protocol::{FlowDefinition, FlowRunParams, FlowRunResult, Method};
+use tabstride_protocol::{FlowDefinition, FlowRunParams, FlowRunResult, Method, StepTiming};
 
 use crate::cli::daemon::parse_duration;
 use crate::cli::ensure_daemon::ensure_daemon;
@@ -104,6 +104,9 @@ fn run(args: FlowRunArgs, format: Format) -> Result<(), CliError> {
                     "ok    {:>2}  {:<24} {}ms",
                     step.index, step.method, step.duration_ms
                 );
+                if let Some(timing) = &step.timing {
+                    println!("      {:>24}  {}", "", format_step_timing(timing));
+                }
             }
         }
     }
@@ -141,6 +144,23 @@ fn parse_variable(raw: &str) -> Result<(String, String), String> {
     Ok((key.trim().into(), value.into()))
 }
 
+fn format_step_timing(timing: &StepTiming) -> String {
+    let mut parts = Vec::new();
+    if let Some(v) = timing.queue_us {
+        parts.push(format!("queue={:.2}ms", v as f64 / 1000.0));
+    }
+    if let Some(v) = timing.websocket_us {
+        parts.push(format!("ws={:.2}ms", v as f64 / 1000.0));
+    }
+    if let Some(v) = timing.extension_us {
+        parts.push(format!("ext={:.2}ms", v as f64 / 1000.0));
+    }
+    if let Some(v) = timing.cdp_us {
+        parts.push(format!("cdp={:.2}ms", v as f64 / 1000.0));
+    }
+    parts.join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +171,26 @@ mod tests {
             parse_variable("token=a=b").unwrap(),
             ("token".into(), "a=b".into())
         );
+    }
+
+    #[test]
+    fn formats_step_timing_phases() {
+        let timing = StepTiming {
+            queue_us: Some(1500),
+            websocket_us: Some(200),
+            extension_us: Some(4200),
+            cdp_us: Some(3100),
+        };
+        let text = format_step_timing(&timing);
+        assert_eq!(text, "queue=1.50ms ws=0.20ms ext=4.20ms cdp=3.10ms");
+    }
+
+    #[test]
+    fn formats_partial_timing() {
+        let timing = StepTiming {
+            cdp_us: Some(900),
+            ..StepTiming::default()
+        };
+        assert_eq!(format_step_timing(&timing), "cdp=0.90ms");
     }
 }

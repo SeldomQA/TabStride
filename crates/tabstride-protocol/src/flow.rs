@@ -221,11 +221,37 @@ pub struct FlowRunParams {
     pub variables: BTreeMap<String, String>,
 }
 
+/// Per-step timing phase breakdown (all values in microseconds).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct StepTiming {
+    /// Time waiting in the per-session dispatch queue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_us: Option<u64>,
+    /// WebSocket round-trip to the extension.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub websocket_us: Option<u64>,
+    /// Extension-side processing (receive → reply).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_us: Option<u64>,
+    /// CDP command execution inside the extension.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cdp_us: Option<u64>,
+}
+
+impl StepTiming {
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FlowStepResult {
     pub index: usize,
     pub method: String,
     pub duration_ms: u64,
+    /// Full-chain timing breakdown for this step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<StepTiming>,
     pub output: Value,
 }
 
@@ -488,5 +514,43 @@ assertions:
         let error = flow.validate().unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidParams);
         assert!(error.message.contains("final assertion 1"));
+    }
+
+    #[test]
+    fn step_timing_serializes_only_present_phases() {
+        let timing = StepTiming {
+            queue_us: Some(120),
+            websocket_us: None,
+            extension_us: Some(3400),
+            cdp_us: Some(2800),
+        };
+        let json = serde_json::to_value(&timing).unwrap();
+        assert_eq!(json["queue_us"], 120);
+        assert_eq!(json["extension_us"], 3400);
+        assert_eq!(json["cdp_us"], 2800);
+        assert!(json.get("websocket_us").is_none());
+    }
+
+    #[test]
+    fn step_result_timing_is_optional_and_skipped_when_empty() {
+        let result = FlowStepResult {
+            index: 1,
+            method: "tool.click".into(),
+            duration_ms: 42,
+            timing: None,
+            output: serde_json::json!({"tab_id": 1}),
+        };
+        let json = serde_json::to_value(&result).unwrap();
+        assert!(json.get("timing").is_none());
+
+        let with_timing = FlowStepResult {
+            timing: Some(StepTiming {
+                cdp_us: Some(900),
+                ..StepTiming::default()
+            }),
+            ..result
+        };
+        let json = serde_json::to_value(&with_timing).unwrap();
+        assert_eq!(json["timing"]["cdp_us"], 900);
     }
 }

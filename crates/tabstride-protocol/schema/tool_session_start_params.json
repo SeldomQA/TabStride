@@ -23,6 +23,11 @@
     "session_id": {
       "type": "string"
     },
+    "snapshot": {
+      "description": "When `true`, the extension will capture an initial accessibility snapshot of the attached/Agent Window tab and return it alongside the session metadata so the agent can skip a separate `tool.snapshot` round-trip (A-2: merged attach+snapshot).",
+      "default": false,
+      "type": "boolean"
+    },
     "tab": {
       "description": "`active` for the last-focused user window. Kept separate from `tab_id` so future selectors can be added without overloading ids.",
       "type": [

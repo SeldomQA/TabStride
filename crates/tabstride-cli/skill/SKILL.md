@@ -179,6 +179,10 @@ than a page state.
 Put requested end-state checks in top-level `assertions`; they run only after every action step
 succeeds. Use an inline `assert` only when its result must gate a later action.
 
+Every `flow run` result includes per-step `duration_ms` and a `timing` breakdown
+(`queue_us`, `websocket_us`, `extension_us`, `cdp_us`) when available. Use `--format json` to
+inspect timing for diagnosing slow steps.
+
 Use `request_help` inside a Flow for a captcha, login, confirmation, or another bounded human step.
 Set the Flow's total `timeout` longer than the human step's `timeout_ms`. Continue resumes the Flow;
 Cancel, timeout, or navigation stops it and must be treated as a failed/aborted Flow, never as
@@ -299,7 +303,7 @@ business/session request, or when the user explicitly requests diagnostics.
 |---------|---------|
 | `tabstride session start` | Start an isolated Agent Window session; prints **4-letter session id** |
 | `tabstride session start --mode attach --tab active` | Lease the current active user tab in place; `--tab-id <id>` targets a known tab id |
-| `tabstride session start --mode attach --tab active --snapshot` | Lease + capture initial page snapshot in one round-trip |
+| `tabstride session start --mode attach --tab active --snapshot` | Lease + capture initial page snapshot in one round-trip (A-2) |
 | `tabstride session stop <id>` | End session; close isolated window or release attach tab; auto-return borrowed tabs |
 | `tabstride session stop --all` | Stop every active session |
 | `tabstride session list` | List active sessions |
