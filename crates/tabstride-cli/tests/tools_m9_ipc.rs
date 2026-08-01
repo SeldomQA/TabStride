@@ -38,6 +38,7 @@ use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tokio_tungstenite::tungstenite::http::Request;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
+#[cfg(unix)]
 use support::wait_for_abort_registered;
 
 const TEST_EXT_ID: &str = "abcdefghijklmnopabcdefghijklmnop";

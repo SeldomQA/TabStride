@@ -298,7 +298,7 @@ fn hermes_home_for_user_home(home: &Path) -> PathBuf {
                 return PathBuf::from(trimmed).join("hermes");
             }
         }
-        return home.join("AppData").join("Local").join("hermes");
+        home.join("AppData").join("Local").join("hermes")
     }
 
     #[cfg(not(windows))]

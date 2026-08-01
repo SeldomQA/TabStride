@@ -340,6 +340,8 @@ async fn complete_flow_runtime_runs_select_wait_help_and_final_assertion_in_orde
                         selected_values: params.values,
                         selected_labels: vec!["Singapore".into()],
                         dialogs: vec![],
+                        document_changed: false,
+                        document_version: None,
                     })
                     .unwrap(),
                 )
@@ -455,6 +457,8 @@ async fn individual_cli_rpc_and_flow_share_the_same_locator_wire_shape() {
                 x: 10.0,
                 y: 20.0,
                 dialogs: vec![],
+                document_changed: false,
+                document_version: None,
             })
             .unwrap(),
         )
@@ -724,6 +728,8 @@ async fn click_round_trips_ref_and_modifiers() {
                 x: 12.5,
                 y: 34.0,
                 dialogs: vec![],
+                document_changed: false,
+                document_version: None,
             })
             .unwrap(),
         )
@@ -770,6 +776,8 @@ async fn fill_round_trips_clear_before_default() {
                 used_selector: Some(".search".into()),
                 value_length: 11,
                 dialogs: vec![],
+                document_changed: false,
+                document_version: None,
             })
             .unwrap(),
         )
@@ -813,6 +821,8 @@ async fn press_round_trips_compound_key() {
                 modifiers: vec![KeyModifier::Ctrl],
                 used_target: None,
                 dialogs: vec![],
+                document_changed: false,
+                document_version: None,
             })
             .unwrap(),
         )
@@ -859,6 +869,8 @@ async fn select_round_trips_values() {
                 selected_values: vec!["us".into(), "ca".into()],
                 selected_labels: vec!["United States".into(), "Canada".into()],
                 dialogs: vec![],
+                document_changed: false,
+                document_version: None,
             })
             .unwrap(),
         )
