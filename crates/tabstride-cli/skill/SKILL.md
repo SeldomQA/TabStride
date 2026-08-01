@@ -89,6 +89,42 @@ Optional: after `session start` reports multiple connected browsers, retry with
 
 Emergency cleanup: `tabstride session stop --all`.
 
+## Fast execution strategy
+
+Minimize round-trips. A deterministic task on a known page completes in three service calls:
+
+```
+1. session start (--mode attach --tab active)   → session id
+2. flow run (all actions + assertions)          → one process, one WebSocket frame
+3. session stop                                 → release
+```
+
+Add `--snapshot` to step 1 only when the page structure is unknown and you need refs to build
+the Flow. If you already know the target locators (CSS, role+name, test-id), skip the snapshot
+entirely and let the Flow resolve them at execution time.
+
+**Snapshot minimization:**
+
+| Situation | Action |
+|-----------|--------|
+| Page structure known from prior context | No snapshot; use stable locators directly |
+| Page unknown, need refs for Flow/commands | One `--snapshot` on session start |
+| After an interaction (`click`/`fill`/…) | Check `document_changed`; re-snapshot only when `true` |
+| After navigation to a new page | Always re-snapshot (refs are invalidated) |
+| Before an assertion on a stable element | No snapshot needed if refs are still valid |
+
+**Anti-patterns (never do these):**
+
+- One CLI process per action for a deterministic sequence → use one Flow.
+- Snapshot after every click/fill regardless of `document_changed` → check the flag first.
+- Split a Flow to inspect intermediate logs → the Flow result already reports per-step output
+  and timing; use `--format json` if needed.
+- Run `status`/`doctor`/`browsers` before the first business command → attach directly.
+- Repeatedly query the DOM (`get-html`, `evaluate`) to locate an element → use one snapshot
+  and semantic locators (`--role`, `--name`, `--label`, `--test-id`).
+- Keep a persistent client alive for work that is fully deterministic → use Flow.
+- Retry a failed Flow blindly without reading its evidence → inspect `error.data.evidence`.
+
 ## Execution path selection
 
 After session start, choose one of two execution paths:
