@@ -255,6 +255,7 @@ pub fn dispatch_click(args: ClickArgs, format: Format) -> Result<(), CliError> {
                 "click ok tab={} target={target} at=({}, {})",
                 reply.tab_id, reply.x, reply.y
             );
+            print_doc_change(reply.document_changed, reply.document_version);
             print_dialog_summaries(&reply.dialogs);
         }
     }
@@ -325,6 +326,7 @@ pub fn dispatch_fill(args: FillArgs, format: Format) -> Result<(), CliError> {
                 "fill ok tab={} target={target} length={}",
                 reply.tab_id, reply.value_length
             );
+            print_doc_change(reply.document_changed, reply.document_version);
             print_dialog_summaries(&reply.dialogs);
         }
     }
@@ -413,6 +415,7 @@ pub fn dispatch_press(args: PressArgs, format: Format) -> Result<(), CliError> {
                 "press ok tab={} key={} code={}{mods}",
                 reply.tab_id, reply.key, reply.code
             );
+            print_doc_change(reply.document_changed, reply.document_version);
             print_dialog_summaries(&reply.dialogs);
         }
     }
@@ -480,10 +483,21 @@ pub fn dispatch_select(args: SelectArgs, format: Format) -> Result<(), CliError>
                 "select ok tab={} target={target} multiple={} values=[{values}] labels=[{labels}]",
                 reply.tab_id, reply.multiple
             );
+            print_doc_change(reply.document_changed, reply.document_version);
             print_dialog_summaries(&reply.dialogs);
         }
     }
     Ok(())
+}
+
+/// Print lightweight page-change signal in human output.
+fn print_doc_change(changed: bool, version: Option<u64>) {
+    if changed {
+        match version {
+            Some(v) => println!("  doc_changed=true doc_version={v}"),
+            None => println!("  doc_changed=true"),
+        }
+    }
 }
 
 fn format_locator(locator: &Locator) -> String {

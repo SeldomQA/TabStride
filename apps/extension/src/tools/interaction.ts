@@ -10,6 +10,7 @@
 //    commands.
 
 import { ChromiumCdp } from "@/browser-driver/chromium-cdp";
+import { readDocumentIdentity } from "@/session-manager/document-cache";
 import type { SessionContext, SessionManager } from "@/session-manager/manager";
 import type {
   ClickParams,
@@ -55,6 +56,39 @@ export interface InteractionDeps {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+// ---------------------------------------------------------------------------
+// Lightweight document-change detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the current document version for a tab. Returns `undefined` when
+ * CDP is unavailable or the page does not support the instrumentation
+ * (non-fatal — callers simply omit the document-change fields).
+ */
+async function readDocVersion(cdp: CdpRunner, tabId: number): Promise<number | undefined> {
+  const identity = await readDocumentIdentity(cdp, tabId);
+  return identity?.version;
+}
+
+/**
+ * Compute the page-change fields by comparing a pre-action document
+ * version with the post-action version. Returns partial result fields
+ * suitable for spreading into the tool result object.
+ */
+async function documentChangeFields(
+  cdp: CdpRunner,
+  tabId: number,
+  versionBefore: number | undefined,
+): Promise<{ document_changed: boolean; document_version?: number }> {
+  const versionAfter = await readDocVersion(cdp, tabId);
+  if (versionAfter === undefined) {
+    // Cannot determine — omit fields (backward compat).
+    return { document_changed: false };
+  }
+  const changed = versionBefore !== undefined && versionAfter !== versionBefore;
+  return { document_changed: changed, document_version: versionAfter };
+}
 
 let defaultDeps: { cdp: ChromiumCdp; tabsApi: ChromeTabsApi } | null = null;
 function getDefaultDeps(): { cdp: ChromiumCdp; tabsApi: ChromeTabsApi } {
@@ -154,6 +188,9 @@ export async function handleClick(
   const button: MouseButton = params.button ?? "left";
   const modifiers = modifiersBitfield(params.modifiers);
 
+  // Capture document version before the interaction.
+  const versionBefore = await readDocVersion(deps.cdp, target.tabId);
+
   const overlayBlocking = await checkOverlayAtPoint(deps.cdp, target.tabId, centre.x, centre.y);
   let automationBypassEnabled = false;
   if (overlayBlocking && deps.bypassOverlay) {
@@ -222,6 +259,7 @@ export async function handleClick(
     }
   }
 
+  const docChange = await documentChangeFields(deps.cdp, target.tabId, versionBefore);
   return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
     tab_id: target.tabId,
     used_target: node.usedTarget,
@@ -229,6 +267,7 @@ export async function handleClick(
     used_selector: node.usedTarget.css,
     x: centre.x,
     y: centre.y,
+    ...docChange,
   });
 }
 
@@ -427,6 +466,9 @@ export async function handleFill(
     return { code: "cancelled", message: "fill aborted" };
   }
 
+  // Capture document version before the interaction.
+  const versionBefore = await readDocVersion(deps.cdp, target.tabId);
+
   const objectIdOrErr = await backendNodeToObject(deps.cdp, target.tabId, node.backendNodeId);
   if (isRpcError(objectIdOrErr)) return objectIdOrErr;
   const objectId = objectIdOrErr;
@@ -478,12 +520,14 @@ export async function handleFill(
     };
   }
 
+  const docChange = await documentChangeFields(deps.cdp, target.tabId, versionBefore);
   return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
     tab_id: target.tabId,
     used_target: node.usedTarget,
     used_ref: node.usedTarget.ref,
     used_selector: node.usedTarget.css,
     value_length: params.value.length,
+    ...docChange,
   });
 }
 
@@ -687,6 +731,9 @@ export async function handlePress(
     return { code: "cancelled", message: "press aborted" };
   }
 
+  // Capture document version before the interaction.
+  const versionBefore = await readDocVersion(deps.cdp, target.tabId);
+
   const modifiers = modifiersBitfield(mods);
   // Suppress `text` when any non-shift modifier is held — `Ctrl+a`
   // should not also type the character "a" into the focused field.
@@ -742,12 +789,14 @@ export async function handlePress(
     };
   }
 
+  const docChange = await documentChangeFields(deps.cdp, target.tabId, versionBefore);
   return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
     tab_id: target.tabId,
     key: descriptor.key,
     code: descriptor.code,
     modifiers: mods,
     used_target: usedTarget,
+    ...docChange,
   });
 }
 
@@ -826,6 +875,9 @@ export async function handleSelect(
     return { code: "cancelled", message: "select aborted" };
   }
 
+  // Capture document version before the interaction.
+  const versionBefore = await readDocVersion(deps.cdp, target.tabId);
+
   const objectIdOrErr = await backendNodeToObject(deps.cdp, target.tabId, node.backendNodeId);
   if (isRpcError(objectIdOrErr)) return objectIdOrErr;
   const objectId = objectIdOrErr;
@@ -872,6 +924,7 @@ export async function handleSelect(
       }
       return { code: "cdp_failed", message: "select mutation returned an unexpected result" };
     }
+    const docChange = await documentChangeFields(deps.cdp, target.tabId, versionBefore);
     return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
       tab_id: target.tabId,
       used_target: node.usedTarget,
@@ -880,6 +933,7 @@ export async function handleSelect(
       multiple: mutation.multiple,
       selected_values: mutation.selected_values,
       selected_labels: mutation.selected_labels,
+      ...docChange,
     });
   } catch (err) {
     return {

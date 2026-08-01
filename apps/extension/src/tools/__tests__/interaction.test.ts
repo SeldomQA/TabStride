@@ -1080,3 +1080,186 @@ describe("handleSelect", () => {
     expect(fake.sent.some(isSelectMutationCall)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// document_changed + document_version in interaction results
+// ---------------------------------------------------------------------------
+
+/** Build a Runtime.evaluate handler that responds to the document-version
+ *  instrumentation with a controllable version number. */
+function docVersionHandler(version: number) {
+  return (params: unknown) => {
+    const expr = String((params as { expression?: string })?.expression ?? "");
+    if (expr.includes("__tabstrideDocumentVersion")) {
+      return { result: { value: { id: "doc-1", version } } };
+    }
+    // Overlay hit-test fallback.
+    return { result: { value: { overlayHostPresent: false, overlayHostConnected: false } } };
+  };
+}
+
+describe("document_changed in interaction results", () => {
+  it("click reports document_changed=true when version increments", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const ctx = await sm.start("aa11");
+    ctx.refStore.set("e3", 1234, { tabId: 4 });
+    let evalCount = 0;
+    const fake = makeFakeCdp({
+      "DOM.scrollIntoViewIfNeeded": () => ({}),
+      "DOM.getContentQuads": () => ({ quads: [[10, 20, 110, 20, 110, 60, 10, 60]] }),
+      "Input.dispatchMouseEvent": () => ({}),
+      "Runtime.evaluate": (params: unknown) => {
+        const expr = String((params as { expression?: string })?.expression ?? "");
+        if (expr.includes("__tabstrideDocumentVersion")) {
+          evalCount += 1;
+          // First call (before): version 5; second call (after): version 6.
+          return { result: { value: { id: "doc-1", version: evalCount === 1 ? 5 : 6 } } };
+        }
+        return { result: { value: { overlayHostPresent: false, overlayHostConnected: false } } };
+      },
+    });
+    const res = await handleClick(
+      sm,
+      { session_id: "aa11", target: { ref: "@e3" } },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    if ("code" in res) throw new Error(JSON.stringify(res));
+    expect(res.document_changed).toBe(true);
+    expect(res.document_version).toBe(6);
+  });
+
+  it("click reports document_changed=false when version stays the same", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const ctx = await sm.start("aa11");
+    ctx.refStore.set("e3", 1234, { tabId: 4 });
+    const fake = makeFakeCdp({
+      "DOM.scrollIntoViewIfNeeded": () => ({}),
+      "DOM.getContentQuads": () => ({ quads: [[10, 20, 110, 20, 110, 60, 10, 60]] }),
+      "Input.dispatchMouseEvent": () => ({}),
+      "Runtime.evaluate": docVersionHandler(3),
+    });
+    const res = await handleClick(
+      sm,
+      { session_id: "aa11", target: { ref: "@e3" } },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    if ("code" in res) throw new Error(JSON.stringify(res));
+    expect(res.document_changed).toBe(false);
+    expect(res.document_version).toBe(3);
+  });
+
+  it("fill reports document_changed=true when DOM mutates", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const ctx = await sm.start("aa11");
+    ctx.refStore.set("e1", 999, { tabId: 4 });
+    let evalCount = 0;
+    const fake = makeFakeCdp({
+      "DOM.describeNode": () => ({
+        node: { backendNodeId: 999, nodeName: "INPUT", attributes: [] },
+      }),
+      "DOM.scrollIntoViewIfNeeded": () => ({}),
+      "DOM.focus": () => ({}),
+      "DOM.resolveNode": () => ({ object: { objectId: "obj-1" } }),
+      "Input.insertText": () => ({}),
+      "Runtime.callFunctionOn": () => ({ result: { value: undefined } }),
+      "Runtime.evaluate": (params: unknown) => {
+        const expr = String((params as { expression?: string })?.expression ?? "");
+        if (expr.includes("__tabstrideDocumentVersion")) {
+          evalCount += 1;
+          return { result: { value: { id: "doc-1", version: evalCount === 1 ? 10 : 11 } } };
+        }
+        return { result: { value: null } };
+      },
+    });
+    const res = await handleFill(
+      sm,
+      { session_id: "aa11", target: { ref: "e1" }, value: "hello" },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    if ("code" in res) throw new Error(JSON.stringify(res));
+    expect(res.document_changed).toBe(true);
+    expect(res.document_version).toBe(11);
+  });
+
+  it("press reports document_changed=false when version is stable", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    await sm.start("aa11");
+    const fake = makeFakeCdp({
+      "Input.dispatchKeyEvent": () => ({}),
+      "Runtime.evaluate": docVersionHandler(7),
+    });
+    const res = await handlePress(
+      sm,
+      { session_id: "aa11", key: "Enter" },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    // PressResult has a `code` field (key code), so use `message` to detect RpcError.
+    if ("message" in res) throw new Error(JSON.stringify(res));
+    expect(res.document_changed).toBe(false);
+    expect(res.document_version).toBe(7);
+  });
+
+  it("select reports document_changed=true when version increments", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const ctx = await sm.start("aa11");
+    ctx.refStore.set("e1", 555, { tabId: 4 });
+    let evalCount = 0;
+    const fake = makeFakeCdp({
+      "DOM.describeNode": () => ({
+        node: { backendNodeId: 555, nodeName: "SELECT", attributes: [] },
+      }),
+      "DOM.scrollIntoViewIfNeeded": () => ({}),
+      "DOM.focus": () => ({}),
+      "DOM.resolveNode": () => ({ object: { objectId: "obj-sel" } }),
+      "Runtime.callFunctionOn": () => ({
+        result: {
+          value: {
+            ok: true,
+            multiple: false,
+            selected_values: ["a"],
+            selected_labels: ["Option A"],
+          },
+        },
+      }),
+      "Runtime.evaluate": (params: unknown) => {
+        const expr = String((params as { expression?: string })?.expression ?? "");
+        if (expr.includes("__tabstrideDocumentVersion")) {
+          evalCount += 1;
+          return { result: { value: { id: "doc-1", version: evalCount === 1 ? 20 : 21 } } };
+        }
+        return { result: { value: null } };
+      },
+    });
+    const res = await handleSelect(
+      sm,
+      { session_id: "aa11", target: { ref: "e1" }, values: ["a"] },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    if ("code" in res) throw new Error(JSON.stringify(res));
+    expect(res.document_changed).toBe(true);
+    expect(res.document_version).toBe(21);
+  });
+
+  it("degrades gracefully when Runtime.evaluate is unsupported", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const ctx = await sm.start("aa11");
+    ctx.refStore.set("e3", 1234, { tabId: 4 });
+    const fake = makeFakeCdp({
+      "DOM.scrollIntoViewIfNeeded": () => ({}),
+      "DOM.getContentQuads": () => ({ quads: [[10, 20, 110, 20, 110, 60, 10, 60]] }),
+      "Input.dispatchMouseEvent": () => ({}),
+      "Runtime.evaluate": () => {
+        throw new Error("Runtime.evaluate not supported");
+      },
+    });
+    const res = await handleClick(
+      sm,
+      { session_id: "aa11", target: { ref: "@e3" } },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    if ("code" in res) throw new Error(JSON.stringify(res));
+    // Should still succeed — document-change fields degrade to false/undefined.
+    expect(res.document_changed).toBe(false);
+    expect(res.document_version).toBeUndefined();
+  });
+});

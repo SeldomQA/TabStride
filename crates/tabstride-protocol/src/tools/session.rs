@@ -48,9 +48,8 @@ pub struct SessionStartResult {
     /// `snapshot` was requested).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// CDP document version at session creation time (A-3 prerequisite:
-    /// lets the agent track when a page has changed without a full
-    /// re-snapshot).
+    /// CDP document version at session creation time (lets the agent
+    /// track when a page has changed without a full re-snapshot).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub document_version: Option<u64>,
     /// Indented aria-snapshot text captured during session creation
@@ -157,7 +156,10 @@ mod tests {
         assert_eq!(encoded["url"], "https://example.com");
         assert_eq!(encoded["title"], "Example");
         assert_eq!(encoded["document_version"], 3);
-        assert_eq!(encoded["snapshot_text"], "root\n  @e1 heading \"Welcome\"\n");
+        assert_eq!(
+            encoded["snapshot_text"],
+            "root\n  @e1 heading \"Welcome\"\n"
+        );
         assert_eq!(encoded["snapshot_ref_count"], 1);
     }
 

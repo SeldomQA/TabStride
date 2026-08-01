@@ -1032,11 +1032,13 @@ async fn session_start_with_snapshot_returns_initial_page_state() {
     assert_eq!(start.url.as_deref(), Some("https://example.com/page"));
     assert_eq!(start.title.as_deref(), Some("Example Page"));
     assert_eq!(start.document_version, Some(7));
-    assert!(start
-        .snapshot_text
-        .as_deref()
-        .unwrap_or("")
-        .contains("@e1 heading \"Welcome\""));
+    assert!(
+        start
+            .snapshot_text
+            .as_deref()
+            .unwrap_or("")
+            .contains("@e1 heading \"Welcome\"")
+    );
     assert_eq!(start.snapshot_ref_count, 2);
     assert!(!start.snapshot_truncated);
 

@@ -470,6 +470,10 @@ export interface ClickResult {
   x: number;
   y: number;
   dialogs?: JavaScriptDialogInfo[];
+  /** Whether the page DOM changed as a result of this interaction. */
+  document_changed?: boolean;
+  /** CDP document version after the interaction. */
+  document_version?: number;
 }
 
 export interface FillParams {
@@ -488,6 +492,10 @@ export interface FillResult {
   used_selector?: string;
   value_length: number;
   dialogs?: JavaScriptDialogInfo[];
+  /** Whether the page DOM changed as a result of this interaction. */
+  document_changed?: boolean;
+  /** CDP document version after the interaction. */
+  document_version?: number;
 }
 
 export interface PressParams {
@@ -507,6 +515,10 @@ export interface PressResult {
   modifiers: KeyModifier[];
   used_target?: Locator;
   dialogs?: JavaScriptDialogInfo[];
+  /** Whether the page DOM changed as a result of this interaction. */
+  document_changed?: boolean;
+  /** CDP document version after the interaction. */
+  document_version?: number;
 }
 
 export interface SelectParams {
@@ -526,6 +538,10 @@ export interface SelectResult {
   selected_values: string[];
   selected_labels: string[];
   dialogs?: JavaScriptDialogInfo[];
+  /** Whether the page DOM changed as a result of this interaction. */
+  document_changed?: boolean;
+  /** CDP document version after the interaction. */
+  document_version?: number;
 }
 
 export interface AssertionSpec {

@@ -156,10 +156,23 @@ tabstride session start --mode attach --tab active --snapshot
 tabstride navigate <url> --session <id>
 tabstride snapshot --session <id>          → aria tree with @e1, @e2, … refs
 tabstride click @e3 --session <id>          → or tabstride fill, tabstride select, tabstride press
-tabstride snapshot --session <id>            → again after navigation / DOM change
+# → result includes document_changed (bool) + document_version (int)
+tabstride snapshot --session <id>            → only when document_changed=true or navigation occurred
 ```
 
 **Refs invalidate after navigation** — always re-snapshot before clicking, filling, or selecting on a new page.
+
+**Skip redundant snapshots:** Every `click`, `fill`, `press`, and `select` result includes
+`document_changed` (boolean) and `document_version` (integer). Use this signal to avoid unnecessary
+snapshot round-trips:
+
+- `document_changed=false` → the DOM did not mutate; current `@eN` refs remain valid. Proceed to
+  the next interaction without re-snapshotting.
+- `document_changed=true` → the DOM mutated. Re-snapshot before the next ref-based interaction
+  unless you are certain the target refs are unaffected (e.g. a sibling-only change).
+
+With `--json`, the fields appear in the result object. In human output, a changed page prints
+`doc_changed=true doc_version=N` on the line below the action summary.
 
 When an interaction or assertion fails, prefer `--json` and inspect `error.data.evidence` before
 retrying. It includes the failure Snapshot, Screenshot, Console errors, Locator match count,

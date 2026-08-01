@@ -146,6 +146,15 @@ pub struct ClickResult {
     /// Native JS dialogs observed and auto-handled during this call.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dialogs: Vec<JavaScriptDialogInfo>,
+    /// Whether the page DOM changed as a result of this interaction
+    /// (lightweight page-change signal so the agent can skip a
+    /// full re-snapshot when nothing moved).
+    #[serde(default)]
+    pub document_changed: bool,
+    /// CDP document version after the interaction (lets the agent
+    /// correlate with prior snapshot state).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_version: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +190,12 @@ pub struct FillResult {
     pub value_length: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dialogs: Vec<JavaScriptDialogInfo>,
+    /// Whether the page DOM changed as a result of this interaction.
+    #[serde(default)]
+    pub document_changed: bool,
+    /// CDP document version after the interaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_version: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +237,12 @@ pub struct PressResult {
     pub used_target: Option<Locator>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dialogs: Vec<JavaScriptDialogInfo>,
+    /// Whether the page DOM changed as a result of this interaction.
+    #[serde(default)]
+    pub document_changed: bool,
+    /// CDP document version after the interaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_version: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +284,12 @@ pub struct SelectResult {
     pub selected_labels: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dialogs: Vec<JavaScriptDialogInfo>,
+    /// Whether the page DOM changed as a result of this interaction.
+    #[serde(default)]
+    pub document_changed: bool,
+    /// CDP document version after the interaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_version: Option<u64>,
 }
 
 #[cfg(test)]
@@ -328,9 +355,84 @@ mod tests {
             modifiers: vec![KeyModifier::Ctrl, KeyModifier::Shift],
             used_target: None,
             dialogs: vec![],
+            document_changed: false,
+            document_version: None,
         };
         let v = serde_json::to_value(&r).unwrap();
         let round: PressResult = serde_json::from_value(v).unwrap();
+        assert_eq!(round, r);
+    }
+
+    #[test]
+    fn click_result_document_changed_round_trips() {
+        let r = ClickResult {
+            tab_id: 42,
+            used_target: ref_locator("@e1"),
+            used_ref: Some("@e1".into()),
+            used_selector: None,
+            x: 100.0,
+            y: 200.0,
+            dialogs: vec![],
+            document_changed: true,
+            document_version: Some(7),
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["document_changed"], true);
+        assert_eq!(v["document_version"], 7);
+        let round: ClickResult = serde_json::from_value(v).unwrap();
+        assert_eq!(round, r);
+    }
+
+    #[test]
+    fn click_result_omits_document_version_when_none() {
+        let r = ClickResult {
+            tab_id: 1,
+            used_target: ref_locator("@e2"),
+            used_ref: None,
+            used_selector: None,
+            x: 0.0,
+            y: 0.0,
+            dialogs: vec![],
+            document_changed: false,
+            document_version: None,
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert!(v.get("document_version").is_none());
+        // document_changed is always present (bool, defaults to false)
+        assert_eq!(v["document_changed"], false);
+    }
+
+    #[test]
+    fn fill_result_deserialises_without_document_fields() {
+        // Backward compat: old responses without document-change fields still parse.
+        let r: FillResult = serde_json::from_value(json!({
+            "tab_id": 10,
+            "used_target": { "ref": "@e5" },
+            "value_length": 5
+        }))
+        .unwrap();
+        assert!(!r.document_changed);
+        assert_eq!(r.document_version, None);
+    }
+
+    #[test]
+    fn select_result_document_changed_round_trips() {
+        let r = SelectResult {
+            tab_id: 3,
+            used_target: ref_locator("@e9"),
+            used_ref: Some("@e9".into()),
+            used_selector: None,
+            multiple: false,
+            selected_values: vec!["us".into()],
+            selected_labels: vec!["United States".into()],
+            dialogs: vec![],
+            document_changed: true,
+            document_version: Some(12),
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["document_changed"], true);
+        assert_eq!(v["document_version"], 12);
+        let round: SelectResult = serde_json::from_value(v).unwrap();
         assert_eq!(round, r);
     }
 
