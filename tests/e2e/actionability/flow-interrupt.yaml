@@ -1,0 +1,8 @@
+name: actionability-flow-user-interrupt-timing
+timeout: 15s
+
+steps:
+  - click:
+      target:
+        testId: interrupt-target
+      timeout_ms: 10000

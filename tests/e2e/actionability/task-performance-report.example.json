@@ -1,277 +1,179 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-07-31T05:27:20.858Z",
+  "generated_at": "2026-08-03T10:06:55.459Z",
   "chrome": "Google Chrome",
-  "samples_per_scenario": 2,
+  "samples_per_scenario": 20,
   "measurement": {
-    "first_action_dispatch": "elapsed from task harness start until flow.run is submitted",
+    "first_action_dispatch": "elapsed from task harness start until flow.run is submitted; each browser Step also carries full-chain Timing",
+    "rpc_count": "top-level Agent/CLI requests; Flow Step metrics are counted separately",
+    "ws_step_count": "Flow browser Steps that traversed the extension WebSocket",
     "cold": "first task after Chrome and extension startup",
     "warm": "subsequent tasks in the same browser process"
   },
   "scenarios": {
     "attach_single_task": {
-      "samples": 2,
-      "warm_samples": 1,
+      "samples": 20,
+      "warm_samples": 19,
       "cold_run": {
         "run_id": "baseline-attach-example-0",
         "temperature": "cold",
         "mode": "attach",
-        "task_total_ms": 276.556,
-        "attach_ms": 17.47,
-        "first_action_dispatch_ms": 136.661,
-        "flow_ms": 120.771,
-        "session_stop_ms": 7.156,
-        "cli_process_count": 5,
-        "rpc_count": 5,
+        "task_total_ms": 144.686,
+        "attach_ms": 48.007,
+        "first_action_dispatch_ms": 48.073,
+        "flow_ms": 88.637,
+        "session_stop_ms": 7.878,
+        "cli_process_count": 3,
+        "rpc_count": 3,
+        "metric_record_count": 7,
         "flow_count": 1,
         "flow_step_count": 4,
-        "snapshot_request_count": 2,
-        "full_ax_tree_calls": 2,
-        "cdp_calls": 9,
-        "locator_cache_hit_rate": null,
-        "snapshot_cache_hit_rate": 0,
-        "overlay_cache_hit_rate": 0.5
-      },
-      "task_total_ms": {
-        "samples": 1,
-        "p50_ms": 112.404,
-        "p95_ms": 112.404,
-        "p99_ms": 112.404,
-        "min_ms": 112.404,
-        "max_ms": 112.404
-      },
-      "attach_ms": {
-        "samples": 1,
-        "p50_ms": 5.979,
-        "p95_ms": 5.979,
-        "p99_ms": 5.979,
-        "min_ms": 5.979,
-        "max_ms": 5.979
-      },
-      "first_action_dispatch_ms": {
-        "samples": 1,
-        "p50_ms": 17.909,
-        "p95_ms": 17.909,
-        "p99_ms": 17.909,
-        "min_ms": 17.909,
-        "max_ms": 17.909
-      },
-      "flow_ms": {
-        "samples": 1,
-        "p50_ms": 76.697,
-        "p95_ms": 76.697,
-        "p99_ms": 76.697,
-        "min_ms": 76.697,
-        "max_ms": 76.697
-      },
-      "session_stop_ms": {
-        "samples": 1,
-        "p50_ms": 6.754,
-        "p95_ms": 6.754,
-        "p99_ms": 6.754,
-        "min_ms": 6.754,
-        "max_ms": 6.754
-      },
-      "cli_process_count": {
-        "samples": 1,
-        "p50": 5,
-        "p95": 5,
-        "p99": 5,
-        "min": 5,
-        "max": 5
-      },
-      "rpc_count": {
-        "samples": 1,
-        "p50": 5,
-        "p95": 5,
-        "p99": 5,
-        "min": 5,
-        "max": 5
-      },
-      "snapshot_request_count": {
-        "samples": 1,
-        "p50": 2,
-        "p95": 2,
-        "p99": 2,
-        "min": 2,
-        "max": 2
-      },
-      "full_ax_tree_calls": {
-        "samples": 1,
-        "p50": 2,
-        "p95": 2,
-        "p99": 2,
-        "min": 2,
-        "max": 2
-      },
-      "cdp_calls": {
-        "samples": 1,
-        "p50": 9,
-        "p95": 9,
-        "p99": 9,
-        "min": 9,
-        "max": 9
-      },
-      "snapshot_cache_hit_rate": 0,
-      "locator_cache_hit_rate": null,
-      "overlay_cache_hit_rate": 0.5,
-      "baseline_p95_ms": 240,
-      "regression_limit_p95_ms": 276
-    },
-    "isolated_single_task": {
-      "samples": 2,
-      "warm_samples": 1,
-      "cold_run": {
-        "run_id": "baseline-isolated-example-0",
-        "temperature": "cold",
-        "mode": "isolated",
-        "task_total_ms": 280.452,
-        "attach_ms": 93.254,
-        "first_action_dispatch_ms": 105.064,
-        "flow_ms": 124.839,
-        "session_stop_ms": 16.132,
-        "cli_process_count": 6,
-        "rpc_count": 6,
-        "flow_count": 1,
-        "flow_step_count": 4,
-        "snapshot_request_count": 2,
-        "full_ax_tree_calls": 2,
-        "cdp_calls": 11,
-        "locator_cache_hit_rate": null,
+        "ws_step_count": 4,
+        "snapshot_request_count": 0,
+        "merged_snapshot_count": 1,
+        "full_ax_tree_calls": 1,
+        "cdp_calls": 61,
+        "locator_cache_hit_rate": 0.2,
         "snapshot_cache_hit_rate": 0,
         "overlay_cache_hit_rate": 0
       },
       "task_total_ms": {
-        "samples": 1,
-        "p50_ms": 267.866,
-        "p95_ms": 267.866,
-        "p99_ms": 267.866,
-        "min_ms": 267.866,
-        "max_ms": 267.866
+        "samples": 19,
+        "p50_ms": 99.597,
+        "p95_ms": 241.461,
+        "p99_ms": 241.461,
+        "min_ms": 95.715,
+        "max_ms": 241.461
       },
       "attach_ms": {
-        "samples": 1,
-        "p50_ms": 74.94,
-        "p95_ms": 74.94,
-        "p99_ms": 74.94,
-        "min_ms": 74.94,
-        "max_ms": 74.94
+        "samples": 19,
+        "p50_ms": 14.556,
+        "p95_ms": 53.577,
+        "p99_ms": 53.577,
+        "min_ms": 12.854,
+        "max_ms": 53.577
       },
       "first_action_dispatch_ms": {
-        "samples": 1,
-        "p50_ms": 88.082,
-        "p95_ms": 88.082,
-        "p99_ms": 88.082,
-        "min_ms": 88.082,
-        "max_ms": 88.082
+        "samples": 19,
+        "p50_ms": 14.575,
+        "p95_ms": 53.598,
+        "p99_ms": 53.598,
+        "min_ms": 12.865,
+        "max_ms": 53.598
       },
       "flow_ms": {
-        "samples": 1,
-        "p50_ms": 119.282,
-        "p95_ms": 119.282,
-        "p99_ms": 119.282,
-        "min_ms": 119.282,
-        "max_ms": 119.282
+        "samples": 19,
+        "p50_ms": 76.415,
+        "p95_ms": 144.675,
+        "p99_ms": 144.675,
+        "min_ms": 73.151,
+        "max_ms": 144.675
       },
       "session_stop_ms": {
-        "samples": 1,
-        "p50_ms": 12.981,
-        "p95_ms": 12.981,
-        "p99_ms": 12.981,
-        "min_ms": 12.981,
-        "max_ms": 12.981
+        "samples": 19,
+        "p50_ms": 7.941,
+        "p95_ms": 43.17,
+        "p99_ms": 43.17,
+        "min_ms": 6.93,
+        "max_ms": 43.17
       },
-      "cli_process_count": {
-        "samples": 1,
-        "p50": 6,
-        "p95": 6,
-        "p99": 6,
-        "min": 6,
-        "max": 6
-      },
-      "rpc_count": {
-        "samples": 1,
-        "p50": 6,
-        "p95": 6,
-        "p99": 6,
-        "min": 6,
-        "max": 6
-      },
-      "snapshot_request_count": {
-        "samples": 1,
-        "p50": 2,
-        "p95": 2,
-        "p99": 2,
-        "min": 2,
-        "max": 2
-      },
-      "full_ax_tree_calls": {
-        "samples": 1,
-        "p50": 2,
-        "p95": 2,
-        "p99": 2,
-        "min": 2,
-        "max": 2
-      },
-      "cdp_calls": {
-        "samples": 1,
-        "p50": 11,
-        "p95": 11,
-        "p99": 11,
-        "min": 11,
-        "max": 11
-      },
+      "cli_process_count": { "samples": 19, "p50": 3, "p95": 3, "p99": 3, "min": 3, "max": 3 },
+      "rpc_count": { "samples": 19, "p50": 3, "p95": 3, "p99": 3, "min": 3, "max": 3 },
+      "metric_record_count": { "samples": 19, "p50": 7, "p95": 7, "p99": 7, "min": 7, "max": 7 },
+      "ws_step_count": { "samples": 19, "p50": 4, "p95": 4, "p99": 4, "min": 4, "max": 4 },
+      "snapshot_request_count": { "samples": 19, "p50": 0, "p95": 0, "p99": 0, "min": 0, "max": 0 },
+      "merged_snapshot_count": { "samples": 19, "p50": 1, "p95": 1, "p99": 1, "min": 1, "max": 1 },
+      "full_ax_tree_calls": { "samples": 19, "p50": 1, "p95": 1, "p99": 1, "min": 1, "max": 1 },
+      "cdp_calls": { "samples": 19, "p50": 61, "p95": 61, "p99": 61, "min": 61, "max": 61 },
       "snapshot_cache_hit_rate": 0,
-      "locator_cache_hit_rate": null,
+      "locator_cache_hit_rate": 0.2,
+      "overlay_cache_hit_rate": 0,
+      "baseline_p95_ms": 240,
+      "regression_limit_p95_ms": 276
+    },
+    "isolated_single_task": {
+      "samples": 20,
+      "warm_samples": 19,
+      "cold_run": {
+        "run_id": "baseline-isolated-example-0",
+        "temperature": "cold",
+        "mode": "isolated",
+        "task_total_ms": 339.769,
+        "attach_ms": 113.009,
+        "first_action_dispatch_ms": 130.253,
+        "flow_ms": 195.415,
+        "session_stop_ms": 14.079,
+        "cli_process_count": 4,
+        "rpc_count": 4,
+        "metric_record_count": 8,
+        "flow_count": 1,
+        "flow_step_count": 4,
+        "ws_step_count": 4,
+        "snapshot_request_count": 0,
+        "merged_snapshot_count": 1,
+        "full_ax_tree_calls": 1,
+        "cdp_calls": 60,
+        "locator_cache_hit_rate": 0.2,
+        "snapshot_cache_hit_rate": 0,
+        "overlay_cache_hit_rate": 0
+      },
+      "task_total_ms": {
+        "samples": 19,
+        "p50_ms": 248.32,
+        "p95_ms": 314.026,
+        "p99_ms": 314.026,
+        "min_ms": 230.486,
+        "max_ms": 314.026
+      },
+      "attach_ms": {
+        "samples": 19,
+        "p50_ms": 94.461,
+        "p95_ms": 152.308,
+        "p99_ms": 152.308,
+        "min_ms": 82.169,
+        "max_ms": 152.308
+      },
+      "first_action_dispatch_ms": {
+        "samples": 19,
+        "p50_ms": 108.867,
+        "p95_ms": 170.61,
+        "p99_ms": 170.61,
+        "min_ms": 95.376,
+        "max_ms": 170.61
+      },
+      "flow_ms": {
+        "samples": 19,
+        "p50_ms": 124.958,
+        "p95_ms": 132.936,
+        "p99_ms": 132.936,
+        "min_ms": 111.797,
+        "max_ms": 132.936
+      },
+      "session_stop_ms": {
+        "samples": 19,
+        "p50_ms": 11.957,
+        "p95_ms": 16.924,
+        "p99_ms": 16.924,
+        "min_ms": 11.479,
+        "max_ms": 16.924
+      },
+      "cli_process_count": { "samples": 19, "p50": 4, "p95": 4, "p99": 4, "min": 4, "max": 4 },
+      "rpc_count": { "samples": 19, "p50": 4, "p95": 4, "p99": 4, "min": 4, "max": 4 },
+      "metric_record_count": { "samples": 19, "p50": 8, "p95": 8, "p99": 8, "min": 8, "max": 8 },
+      "ws_step_count": { "samples": 19, "p50": 4, "p95": 4, "p99": 4, "min": 4, "max": 4 },
+      "snapshot_request_count": { "samples": 19, "p50": 0, "p95": 0, "p99": 0, "min": 0, "max": 0 },
+      "merged_snapshot_count": { "samples": 19, "p50": 1, "p95": 1, "p99": 1, "min": 1, "max": 1 },
+      "full_ax_tree_calls": { "samples": 19, "p50": 1, "p95": 1, "p99": 1, "min": 1, "max": 1 },
+      "cdp_calls": { "samples": 19, "p50": 60, "p95": 60, "p99": 60, "min": 60, "max": 60 },
+      "snapshot_cache_hit_rate": 0,
+      "locator_cache_hit_rate": 0.2,
       "overlay_cache_hit_rate": 0,
       "baseline_p95_ms": 345,
       "regression_limit_p95_ms": 396.75
     }
   },
   "runs": {
-    "attach_single_task": [
-      {
-        "run_id": "baseline-attach-example-0",
-        "temperature": "cold",
-        "mode": "attach",
-        "task_total_ms": 276.556,
-        "attach_ms": 17.47,
-        "first_action_dispatch_ms": 136.661,
-        "flow_ms": 120.771,
-        "session_stop_ms": 7.156,
-        "cli_process_count": 5,
-        "rpc_count": 5,
-        "flow_count": 1,
-        "flow_step_count": 4,
-        "snapshot_request_count": 2,
-        "full_ax_tree_calls": 2,
-        "cdp_calls": 9,
-        "locator_cache_hit_rate": null,
-        "snapshot_cache_hit_rate": 0,
-        "overlay_cache_hit_rate": 0.5
-      }
-    ],
-    "isolated_single_task": [
-      {
-        "run_id": "baseline-isolated-example-0",
-        "temperature": "cold",
-        "mode": "isolated",
-        "task_total_ms": 280.452,
-        "attach_ms": 93.254,
-        "first_action_dispatch_ms": 105.064,
-        "flow_ms": 124.839,
-        "session_stop_ms": 16.132,
-        "cli_process_count": 6,
-        "rpc_count": 6,
-        "flow_count": 1,
-        "flow_step_count": 4,
-        "snapshot_request_count": 2,
-        "full_ax_tree_calls": 2,
-        "cdp_calls": 11,
-        "locator_cache_hit_rate": null,
-        "snapshot_cache_hit_rate": 0,
-        "overlay_cache_hit_rate": 0
-      }
-    ]
+    "attach_single_task": [],
+    "isolated_single_task": []
   }
 }

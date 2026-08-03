@@ -24,9 +24,11 @@ pnpm perf:chrome
 ```
 
 Run the complete single-task baseline. It measures both attach and isolated
-paths as `session start → snapshot → flow → snapshot → session stop`, assigns
-one stable `run_id` to every RPC in the task, and reports CLI/RPC/Snapshot/AX
-counts together with cold/warm latency:
+paths. Attach uses `session start --snapshot → flow → session stop`; isolated
+adds one `tab create` request after its merged Agent-tab Snapshot. Each path
+assigns one stable `run_id` to every RPC and reports CLI processes, top-level
+RPCs, WebSocket Flow steps, merged/standalone Snapshot counts, Full AX calls,
+cache hit rates, and cold/warm latency:
 
 ```bash
 pnpm perf:task
@@ -46,8 +48,10 @@ Set `TABSTRIDE_CHROME=/path/to/chrome` when Chrome is not available in a
 standard location. Pass `--headed` directly to
 `scripts/actionability-chrome-e2e.mjs` for local diagnosis.
 
-The scenario page covers delayed insertion, disabled-to-enabled transitions,
-continuous movement, temporary obstruction, DOM replacement, strict
-multi-match errors, structured timeout evidence, the in-page user Stop
-control, attach-tab scope isolation, CLI/Flow parity, and a deterministic form
-creation task.
+The scenario page covers merged attach/isolated Snapshots and cache reuse;
+changed/unchanged/unknown page signals; real navigation; Delta fallback and
+new-ref reuse; delayed insertion; disabled-to-enabled transitions; continuous
+movement; temporary obstruction; DOM replacement; strict multi-match errors;
+structured timeout evidence; Flow success/failure/timeout/user Stop Timing;
+attach-tab scope isolation; CLI/Flow parity; one persistent adaptive client;
+and a deterministic form-creation task.

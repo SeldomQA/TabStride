@@ -163,6 +163,15 @@
       </section>
 
       <section>
+        <h2>Page update signals</h2>
+        <button data-testid="no-change-target">No page change</button>
+        <input data-testid="no-change-input" aria-label="No change input" />
+        <button data-testid="delta-add-target">Add delta target</button>
+        <div id="delta-slot"></div>
+        <a data-testid="navigation-target" href="?navigated=1">Navigate document</a>
+      </section>
+
+      <section>
         <h2>Single-task form benchmark</h2>
         <form data-testid="baseline-form">
           <label for="baseline-name">Name</label>
@@ -271,6 +280,20 @@
       byTestId("hot-target").addEventListener("click", () => {
         hotCount += 1;
         setResult("hot-result", String(hotCount));
+      });
+
+      byTestId("no-change-target").addEventListener("click", () => {
+        // Deliberately leave DOM state unchanged.
+      });
+
+      byTestId("delta-add-target").addEventListener("click", () => {
+        const target = document.createElement("button");
+        target.dataset.testid = "delta-new-target";
+        target.textContent = "Delta new target";
+        target.addEventListener("click", () => {
+          target.dataset.clicked = "true";
+        });
+        document.querySelector("#delta-slot").replaceChildren(target);
       });
 
       byTestId("baseline-form").addEventListener("submit", (event) => {

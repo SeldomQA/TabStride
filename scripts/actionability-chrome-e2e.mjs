@@ -160,27 +160,31 @@ async function main() {
       console.log("PASS real Chrome single-task performance baseline");
     } else {
       const start = runCli(binary, commandEnv, [
+        "--run-id",
+        "chrome-fast-path-e2e",
         "session",
         "start",
         "--mode",
         "attach",
         "--tab-id",
         String(attachedTabId),
+        "--snapshot",
       ]);
       expectOk(start, "start attach session");
       sessionId = start.json.session_id;
+      context.initialStart = start.json;
 
+      if (options.mode !== "e2e") {
+        await runBenchmark(context, options.samples, options.baseline, options.report);
+      }
       if (options.mode !== "benchmark") {
         try {
-          await runE2e(context);
+          await runE2e(context, tabstrideHome);
         } catch (error) {
           throw new Error(
             `${error}\nServe output:\n${serve.capturedOutput}\nChrome output:\n${chromeProcess.capturedOutput}`,
           );
         }
-      }
-      if (options.mode !== "e2e") {
-        await runBenchmark(context, options.samples, options.baseline, options.report);
       }
 
       const stop = runCli(binary, commandEnv, ["session", "stop", sessionId]);
@@ -212,7 +216,7 @@ async function main() {
   }
 }
 
-async function runE2e(ctx) {
+async function runE2e(ctx, tabstrideHome) {
   const cli = (...args) => runCli(ctx.binary, ctx.env, args);
   const click = (testId, timeout = "3s") =>
     cli("click", "--test-id", testId, "--session", sessionId, "--timeout", timeout);
@@ -229,6 +233,52 @@ async function runE2e(ctx) {
       timeout,
     );
 
+  console.log("E2E attach returns merged initial Snapshot and reusable refs");
+  if (
+    ctx.initialStart?.snapshot_available !== true ||
+    typeof ctx.initialStart?.snapshot_text !== "string" ||
+    ctx.initialStart.snapshot_ref_count < 1 ||
+    ctx.initialStart.attached_tab_id !== ctx.attachedTabId
+  ) {
+    throw new Error(`attach merged Snapshot is incomplete: ${JSON.stringify(ctx.initialStart)}`);
+  }
+  const delayedStartRef = snapshotRef(ctx.initialStart.snapshot_text, "Start delayed appearance");
+
+  console.log("E2E incremental Snapshot reuses merged Snapshot cache");
+  const cachedSnapshot = cli(
+    "--run-id",
+    "chrome-fast-path-e2e",
+    "snapshot",
+    "--session",
+    sessionId,
+    "--incremental",
+  );
+  expectOk(cachedSnapshot, "incremental Snapshot after merged Snapshot");
+  if (cachedSnapshot.json?.snapshot_kind !== "cached" || cachedSnapshot.json?.text !== "") {
+    throw new Error(`initial Snapshot cache was not reused: ${cachedSnapshot.output}`);
+  }
+  const cacheMetrics = await metricsForRun(tabstrideHome, "chrome-fast-path-e2e");
+  const cacheCounters = sumRuntimeCounters(cacheMetrics);
+  if (cacheCounters.snapshot_cache_hits < 1 || cacheCounters.full_ax_tree_calls !== 1) {
+    throw new Error(`merged Snapshot cache counters are wrong: ${JSON.stringify(cacheCounters)}`);
+  }
+
+  console.log("E2E isolated merged Snapshot resolves a real Agent tab");
+  const isolated = cli("session", "start", "--snapshot");
+  expectOk(isolated, "isolated merged Snapshot");
+  try {
+    if (
+      !Number.isInteger(isolated.json?.agent_window_id) ||
+      isolated.json?.attached_tab_id != null ||
+      isolated.json?.snapshot_available !== true ||
+      typeof isolated.json?.snapshot_text !== "string"
+    ) {
+      throw new Error(`isolated merged Snapshot did not use the Agent tab: ${isolated.output}`);
+    }
+  } finally {
+    expectOk(cli("session", "stop", isolated.json.session_id), "stop isolated Snapshot session");
+  }
+
   console.log("E2E delayed appearance");
   expectOk(
     cli(
@@ -243,7 +293,10 @@ async function runE2e(ctx) {
     ),
     "fixture preflight",
   );
-  expectOk(click("start-delayed"), "arm delayed appearance");
+  expectOk(
+    cli("click", "--ref", delayedStartRef, "--session", sessionId, "--timeout", "3s"),
+    "arm delayed appearance through merged Snapshot ref",
+  );
   expectOk(click("delayed-target"), "wait for delayed target");
   expectOk(assertText("delayed-result", "clicked"), "delayed target result");
 
@@ -266,6 +319,191 @@ async function runE2e(ctx) {
   expectOk(click("start-rebuild"), "arm DOM rebuild");
   expectOk(click("rebuild-target"), "re-resolve rebuilt target");
   expectOk(assertText("rebuild-result", "clicked"), "rebuilt target result");
+
+  console.log("E2E page-change changed/unchanged/unknown states");
+  const unchangedClick = cli(
+    "click",
+    "--test-id",
+    "no-change-target",
+    "--session",
+    sessionId,
+    "--page-update",
+    "signal",
+  );
+  expectOk(unchangedClick, "unchanged click signal");
+  expectPageChange(unchangedClick, false, true, "unchanged click");
+  const unchangedFill = cli(
+    "fill",
+    "--test-id",
+    "no-change-input",
+    "--value",
+    "no-dom-mutation",
+    "--session",
+    sessionId,
+    "--page-update",
+    "signal",
+  );
+  expectOk(unchangedFill, "unchanged fill signal");
+  expectPageChange(unchangedFill, false, true, "unchanged fill");
+  const changed = cli(
+    "click",
+    "--test-id",
+    "hot-target",
+    "--session",
+    sessionId,
+    "--page-update",
+    "signal",
+  );
+  expectOk(changed, "changed click signal");
+  expectPageChange(changed, true, true, "DOM-changing click");
+
+  const navigated = cli(
+    "click",
+    "--role",
+    "link",
+    "--name",
+    "Navigate document",
+    "--exact",
+    "--session",
+    sessionId,
+    "--page-update",
+    "signal",
+    "--timeout",
+    "3s",
+  );
+  expectOk(navigated, "navigation page-change signal");
+  const navigationTarget = await waitFor(
+    "fixture document navigation",
+    async () =>
+      (await devtools.targets()).find(
+        (target) =>
+          target.type === "page" && target.url.startsWith(`${ctx.fixtureUrl}?navigated=1`),
+      ) ?? false,
+    2_000,
+  );
+  if (!navigationTarget) throw new Error("fixture navigation did not occur");
+  expectPageChange(navigated, true, true, "document navigation");
+  const navigatedPage = await devtools.page(navigationTarget.url);
+  await waitFor(
+    "fixture navigation readiness",
+    async () => (await navigatedPage.evaluate("document.readyState")) === "complete",
+    2_000,
+  );
+  console.log("E2E navigation completed; renewing attach lease");
+  expectOk(cli("session", "stop", sessionId), "release navigated attach session");
+  sessionId = undefined;
+  navigatedPage.close();
+  console.log("E2E old navigation target closing");
+  await devtools.closeTarget(navigationTarget.id);
+  console.log("E2E clean fixture target opening");
+  await devtools.createTarget(ctx.fixtureUrl);
+  console.log("E2E clean fixture target opened");
+  await waitFor(
+    "restored fixture after navigation signal",
+    async () => (await devtools.targets()).some((target) => target.url === ctx.fixtureUrl),
+    2_000,
+  );
+  console.log("E2E clean fixture URL ready");
+  ctx.attachedTabId = await waitForExtensionTabId(ctx.fixtureUrl);
+  console.log("E2E clean fixture extension tab resolved");
+  const resumed = cli(
+    "session",
+    "start",
+    "--mode",
+    "attach",
+    "--tab-id",
+    String(ctx.attachedTabId),
+  );
+  console.log("E2E clean fixture attach request returned");
+  expectOk(resumed, "reattach fixture after navigation signal");
+  sessionId = resumed.json.session_id;
+
+  const pageForUnknown = await devtools.page(ctx.fixtureUrl);
+  await pageForUnknown.evaluate(
+    `(() => {
+      Object.defineProperty(globalThis, "__tabstrideDocumentVersion", {
+        value: null,
+        configurable: false
+      });
+      return true;
+    })()`,
+  );
+  pageForUnknown.close();
+  const unknown = cli(
+    "click",
+    "--test-id",
+    "no-change-target",
+    "--session",
+    sessionId,
+    "--page-update",
+    "delta",
+  );
+  expectOk(unknown, "instrumentation unavailable signal");
+  expectPageChange(unknown, false, false, "instrumentation unavailable");
+  if (unknown.json?.snapshot_delta?.status !== "delta_unavailable") {
+    throw new Error(`unknown signal did not expose delta_unavailable: ${unknown.output}`);
+  }
+  const fallback = cli("snapshot", "--session", sessionId);
+  expectOk(fallback, "full Snapshot fallback after delta unavailable");
+  if (fallback.json?.snapshot_kind !== "full" || !fallback.json?.text) {
+    throw new Error(`Delta fallback did not return a full Snapshot: ${fallback.output}`);
+  }
+  expectOk(cli("session", "stop", sessionId), "release instrumentation test session");
+  sessionId = undefined;
+  const poisonedTarget = (await devtools.targets()).find(
+    (target) => target.type === "page" && target.url === ctx.fixtureUrl,
+  );
+  if (!poisonedTarget) throw new Error("instrumentation test target not found");
+  await devtools.closeTarget(poisonedTarget.id);
+  await devtools.createTarget(ctx.fixtureUrl);
+  await waitFor(
+    "clean fixture after instrumentation test",
+    async () => (await devtools.targets()).some((target) => target.url === ctx.fixtureUrl),
+    2_000,
+  );
+  ctx.attachedTabId = await waitForExtensionTabId(ctx.fixtureUrl);
+  const instrumentationResumed = cli(
+    "session",
+    "start",
+    "--mode",
+    "attach",
+    "--tab-id",
+    String(ctx.attachedTabId),
+  );
+  expectOk(instrumentationResumed, "reattach after instrumentation test");
+  sessionId = instrumentationResumed.json.session_id;
+
+  console.log("E2E action Delta exposes and reuses new refs");
+  expectOk(cli("snapshot", "--session", sessionId), "establish Delta Snapshot baseline");
+  const delta = cli(
+    "click",
+    "--test-id",
+    "delta-add-target",
+    "--session",
+    sessionId,
+    "--page-update",
+    "delta",
+  );
+  expectOk(delta, "action Snapshot Delta");
+  if (delta.json?.snapshot_delta?.status !== "available") {
+    throw new Error(`action did not return an available Delta: ${delta.output}`);
+  }
+  const deltaRef = snapshotRef(delta.json.snapshot_delta.text, "Delta new target");
+  expectOk(
+    cli("click", "--ref", deltaRef, "--session", sessionId, "--page-update", "none"),
+    "reuse ref returned by Snapshot Delta",
+  );
+  expectOk(
+    cli(
+      "assert",
+      "--css",
+      '[data-testid="delta-new-target"][data-clicked="true"]',
+      "--visible",
+      "--session",
+      sessionId,
+    ),
+    "Delta ref action result",
+  );
 
   console.log("E2E strict multi-match");
   const ambiguous = cli(
@@ -320,6 +558,29 @@ async function runE2e(ctx) {
   ) {
     throw new Error(`Flow did not use the shared tool path: ${flow.output}`);
   }
+  for (const step of flow.json.completed_steps) {
+    expectStepTiming(step, `successful Flow step ${step.index}`);
+  }
+
+  console.log("E2E failed and timed-out Flow steps retain Timing");
+  const failedFlow = cli(
+    "flow",
+    "run",
+    join(fixtureDir, "flow-failure.yaml"),
+    "--session",
+    sessionId,
+  );
+  expectErrorCode(failedFlow, "ambiguous_target", "failed Flow timing");
+  expectStepTiming(failedFlow.json?.data?.failed_step_result, "failed Flow step");
+  const timedOutFlow = cli(
+    "flow",
+    "run",
+    join(fixtureDir, "flow-timeout.yaml"),
+    "--session",
+    sessionId,
+  );
+  expectErrorCode(timedOutFlow, "timeout", "timed-out Flow timing");
+  expectStepTiming(timedOutFlow.json?.data?.failed_step_result, "timed-out Flow step");
 
   // Keep cross-tab creation after every positive browser action: the
   // permission assertion happens before any extension CDP dispatch.
@@ -350,17 +611,61 @@ async function runE2e(ctx) {
     await devtools.closeTarget(siblingTargetId);
   }
 
+  console.log("E2E adaptive task reuses one persistent client");
+  const adaptiveUrl = `${ctx.fixtureUrl}?adaptive=1`;
+  const adaptiveTargetId = await devtools.createTarget(adaptiveUrl);
+  try {
+    const adaptiveTabId = await waitForExtensionTabId(adaptiveUrl);
+    const client = new PersistentClient(ctx.binary, ctx.env);
+    try {
+      const start = await client.request({
+        id: "adaptive-start",
+        method: "session.start",
+        params: { mode: "attach", tab_id: adaptiveTabId, snapshot: true },
+      });
+      expectProtocolOk(start, "persistent client attach");
+      const adaptiveSession = start.result.session_id;
+      if (start.result.snapshot_available !== true) {
+        throw new Error(`persistent attach omitted merged Snapshot: ${JSON.stringify(start)}`);
+      }
+      const action = await client.request({
+        id: "adaptive-click",
+        method: "tool.click",
+        params: {
+          session_id: adaptiveSession,
+          target: { testId: "no-change-target" },
+          page_update: "signal",
+        },
+      });
+      expectProtocolOk(action, "persistent client action");
+      if (action.result.document_change_known !== true) {
+        throw new Error(`persistent action lost page-change signal: ${JSON.stringify(action)}`);
+      }
+      const stop = await client.request({
+        id: "adaptive-stop",
+        method: "session.stop",
+        params: { session_id: adaptiveSession },
+      });
+      expectProtocolOk(stop, "persistent client stop");
+      if (client.processCount !== 1) {
+        throw new Error(`adaptive task spawned ${client.processCount} client processes`);
+      }
+    } finally {
+      await client.close();
+    }
+  } finally {
+    await devtools.closeTarget(adaptiveTargetId);
+  }
+
   // User Stop leaves the session in a deliberate pending-interrupt state, so
   // it must be the final request in the session.
-  console.log("E2E user Stop interrupts an inflight action");
+  console.log("E2E user Stop interrupts Flow and retains failed-step Timing");
   const interrupted = runCliAsync(ctx.binary, ctx.env, [
-    "click",
-    "--test-id",
-    "interrupt-target",
+    "flow",
+    "run",
+    join(fixtureDir, "flow-interrupt.yaml"),
     "--session",
     sessionId,
-    "--timeout",
-    "10s",
   ]);
   const page = await devtools.page(ctx.fixtureUrl);
   await waitFor(
@@ -381,6 +686,11 @@ async function runE2e(ctx) {
   page.close();
   const interruptedResult = await interrupted;
   expectErrorCode(interruptedResult, "user_aborted", "overlay user Stop");
+  expectStepTiming(
+    interruptedResult.json?.data?.failed_step_result,
+    "user-interrupted Flow step",
+    false,
+  );
 }
 
 async function runBenchmark(ctx, samples, baselinePath, reportPath) {
@@ -394,7 +704,17 @@ async function runBenchmark(ctx, samples, baselinePath, reportPath) {
   for (let index = 0; index < total; index += 1) {
     const clickStarted = performance.now();
     expectOk(
-      cli("click", "--test-id", "hot-target", "--session", sessionId, "--timeout", "3s"),
+      cli(
+        "click",
+        "--test-id",
+        "hot-target",
+        "--session",
+        sessionId,
+        "--timeout",
+        "3s",
+        "--page-update",
+        "none",
+      ),
       "benchmark CLI click",
     );
     const clickMs = performance.now() - clickStarted;
@@ -475,11 +795,22 @@ async function runTaskBaseline(ctx, samples, baselinePath, reportPath, tabstride
       try {
         const startArgs =
           mode === "attach"
-            ? ["session", "start", "--mode", "attach", "--tab-id", String(ctx.attachedTabId)]
-            : ["session", "start"];
+            ? [
+                "session",
+                "start",
+                "--mode",
+                "attach",
+                "--tab-id",
+                String(ctx.attachedTabId),
+                "--snapshot",
+              ]
+            : ["session", "start", "--snapshot"];
         const start = cli(...startArgs);
         cliProcesses += 1;
         expectOk(start, `${scenario} session start`);
+        if (start.json?.snapshot_available !== true || !start.json?.snapshot_text) {
+          throw new Error(`${scenario} did not return a merged initial Snapshot: ${start.output}`);
+        }
         taskSession = start.json.session_id;
         const attachMs = start.durationMs;
 
@@ -492,19 +823,14 @@ async function runTaskBaseline(ctx, samples, baselinePath, reportPath, tabstride
           await writeFile(flowFile, `${JSON.stringify(taskFlowForTab(taskTabId), null, 2)}\n`);
         }
 
-        const snapshotTabArgs = taskTabId === undefined ? [] : ["--tab-id", String(taskTabId)];
-        const initialSnapshot = cli("snapshot", "--session", taskSession, ...snapshotTabArgs);
-        cliProcesses += 1;
-        expectOk(initialSnapshot, `${scenario} initial snapshot`);
         const firstActionDispatchMs = performance.now() - taskStarted;
 
         const flow = cli("flow", "run", flowFile, "--session", taskSession);
         cliProcesses += 1;
         expectOk(flow, `${scenario} flow`);
-
-        const finalSnapshot = cli("snapshot", "--session", taskSession, ...snapshotTabArgs);
-        cliProcesses += 1;
-        expectOk(finalSnapshot, `${scenario} final snapshot`);
+        for (const step of flow.json?.completed_steps ?? []) {
+          expectStepTiming(step, `${scenario} Flow step ${step.index}`);
+        }
 
         const stop = cli("session", "stop", taskSession);
         cliProcesses += 1;
@@ -514,6 +840,32 @@ async function runTaskBaseline(ctx, samples, baselinePath, reportPath, tabstride
         const taskTotalMs = performance.now() - taskStarted;
         const metrics = await metricsForRun(tabstrideHome, runId);
         const counters = sumRuntimeCounters(metrics);
+        const agentRpcCount = metrics.filter((record) => record.step_index == null).length;
+        const wsStepCount = metrics.filter(
+          (record) =>
+            record.step_index != null &&
+            record.timing?.extension_sent_at != null &&
+            record.timing?.serve_extension_received_at != null,
+        ).length;
+        const snapshotRequestCount = metrics.filter(
+          (record) => record.method === "tool.snapshot",
+        ).length;
+        const expectedCliProcesses = mode === "attach" ? 3 : 4;
+        if (cliProcesses !== expectedCliProcesses) {
+          throw new Error(
+            `${scenario} used ${cliProcesses} CLI processes, expected ${expectedCliProcesses}`,
+          );
+        }
+        if (agentRpcCount !== expectedCliProcesses) {
+          throw new Error(
+            `${scenario} used ${agentRpcCount} Agent RPCs, expected ${expectedCliProcesses}`,
+          );
+        }
+        if (snapshotRequestCount !== 0 || counters.full_ax_tree_calls !== 1) {
+          throw new Error(
+            `${scenario} fast path used snapshot_requests=${snapshotRequestCount}, full_ax_tree_calls=${counters.full_ax_tree_calls}`,
+          );
+        }
         scenarios[scenario].push({
           run_id: runId,
           temperature: index === 0 ? "cold" : "warm",
@@ -524,11 +876,13 @@ async function runTaskBaseline(ctx, samples, baselinePath, reportPath, tabstride
           flow_ms: round(flow.durationMs),
           session_stop_ms: round(stop.durationMs),
           cli_process_count: cliProcesses,
-          rpc_count: metrics.length,
+          rpc_count: agentRpcCount,
+          metric_record_count: metrics.length,
           flow_count: 1,
           flow_step_count: flow.json?.completed_steps?.length ?? 0,
-          snapshot_request_count: metrics.filter((record) => record.method === "tool.snapshot")
-            .length,
+          ws_step_count: wsStepCount,
+          snapshot_request_count: snapshotRequestCount,
+          merged_snapshot_count: 1,
           full_ax_tree_calls: counters.full_ax_tree_calls,
           cdp_calls: counters.cdp_calls,
           locator_cache_hit_rate: counterHitRate(
@@ -559,7 +913,9 @@ async function runTaskBaseline(ctx, samples, baselinePath, reportPath, tabstride
     samples_per_scenario: samples,
     measurement: {
       first_action_dispatch:
-        "elapsed from task harness start until flow.run is submitted; browser-side step timing is added in Task A-5",
+        "elapsed from task harness start until flow.run is submitted; each browser Step also carries full-chain Timing",
+      rpc_count: "top-level Agent/CLI requests; Flow Step metrics are counted separately",
+      ws_step_count: "Flow browser Steps that traversed the extension WebSocket",
       cold: "first task after Chrome and extension startup",
       warm: "subsequent tasks in the same browser process",
     },
@@ -612,6 +968,7 @@ function taskFlowForTab(tabId) {
           target: { testId: "baseline-name" },
           value: "Baseline customer",
           tab_id: tabId,
+          page_update: "none",
         },
       },
       {
@@ -619,12 +976,14 @@ function taskFlowForTab(tabId) {
           target: { testId: "baseline-kind" },
           values: ["priority"],
           tab_id: tabId,
+          page_update: "none",
         },
       },
       {
         click: {
           target: { testId: "baseline-submit" },
           tab_id: tabId,
+          page_update: "none",
         },
       },
     ],
@@ -690,7 +1049,10 @@ function summarizeTaskRuns(runs) {
     session_stop_ms: summarize(measured.map((run) => run.session_stop_ms)),
     cli_process_count: summarizeCount(measured.map((run) => run.cli_process_count)),
     rpc_count: summarizeCount(measured.map((run) => run.rpc_count)),
+    metric_record_count: summarizeCount(measured.map((run) => run.metric_record_count)),
+    ws_step_count: summarizeCount(measured.map((run) => run.ws_step_count)),
     snapshot_request_count: summarizeCount(measured.map((run) => run.snapshot_request_count)),
+    merged_snapshot_count: summarizeCount(measured.map((run) => run.merged_snapshot_count)),
     full_ax_tree_calls: summarizeCount(measured.map((run) => run.full_ax_tree_calls)),
     cdp_calls: summarizeCount(measured.map((run) => run.cdp_calls)),
     snapshot_cache_hit_rate: meanOptional(measured.map((run) => run.snapshot_cache_hit_rate)),
@@ -784,6 +1146,86 @@ function runCliAsync(binary, env, args) {
   });
 }
 
+class PersistentClient {
+  constructor(binary, env) {
+    this.processCount = 1;
+    this.pending = new Map();
+    this.stderr = "";
+    this.buffer = "";
+    this.child = spawn(binary, ["client", "--timeout", "15s"], {
+      cwd: repoRoot,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    children.add(this.child);
+    this.child.stderr.on("data", (chunk) => {
+      this.stderr += chunk;
+    });
+    this.child.stdout.on("data", (chunk) => {
+      this.buffer += chunk;
+      for (;;) {
+        const newline = this.buffer.indexOf("\n");
+        if (newline < 0) break;
+        const line = this.buffer.slice(0, newline).trim();
+        this.buffer = this.buffer.slice(newline + 1);
+        if (!line) continue;
+        let frame;
+        try {
+          frame = JSON.parse(line);
+        } catch (error) {
+          this.rejectAll(new Error(`persistent client emitted invalid JSON: ${line}: ${error}`));
+          continue;
+        }
+        const pending = this.pending.get(frame.id);
+        if (!pending) continue;
+        this.pending.delete(frame.id);
+        pending.resolve(frame);
+      }
+    });
+    this.child.once("error", (error) => this.rejectAll(error));
+    this.child.once("close", (status) => {
+      children.delete(this.child);
+      if (this.pending.size > 0) {
+        this.rejectAll(new Error(`persistent client exited with ${status}: ${this.stderr.trim()}`));
+      }
+    });
+  }
+
+  request(frame) {
+    if (!frame?.id || this.pending.has(frame.id)) {
+      throw new Error(`persistent request requires a unique id: ${JSON.stringify(frame)}`);
+    }
+    return new Promise((resolvePromise, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(frame.id);
+        reject(new Error(`persistent request ${frame.id} timed out: ${this.stderr.trim()}`));
+      }, 20_000);
+      this.pending.set(frame.id, {
+        resolve: (response) => {
+          clearTimeout(timeout);
+          resolvePromise(response);
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      });
+      this.child.stdin.write(`${JSON.stringify(frame)}\n`);
+    });
+  }
+
+  rejectAll(error) {
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+  }
+
+  async close() {
+    if (this.child.exitCode !== null) return;
+    this.child.stdin.end();
+    await waitForChildExit(this.child);
+  }
+}
+
 function parseJson(text) {
   try {
     return JSON.parse(text);
@@ -801,6 +1243,54 @@ function expectErrorCode(result, code, label) {
   if (result.ok || result.json?.code !== code) {
     throw new Error(`${label} expected ${code}:\n${result.output}`);
   }
+}
+
+function expectProtocolOk(frame, label) {
+  if (!frame?.result || frame.error) {
+    throw new Error(`${label} failed: ${JSON.stringify(frame)}`);
+  }
+}
+
+function expectPageChange(result, changed, known, label) {
+  if (result.json?.document_changed !== changed || result.json?.document_change_known !== known) {
+    throw new Error(`${label} expected changed=${changed}, known=${known}: ${result.output}`);
+  }
+}
+
+function expectStepTiming(step, label, requireTransportPhases = true) {
+  if (!step || typeof step.duration_ms !== "number" || !step.timing) {
+    throw new Error(`${label} has no Timing: ${JSON.stringify(step)}`);
+  }
+  if (!requireTransportPhases) {
+    if (!Object.values(step.timing).some((value) => typeof value === "number")) {
+      throw new Error(`${label} has no observed Timing phase: ${JSON.stringify(step)}`);
+    }
+    return;
+  }
+  for (const field of [
+    "queue_us",
+    "websocket_us",
+    "websocket_roundtrip_us",
+    "extension_us",
+    "extension_non_cdp_us",
+    "cdp_us",
+    "cdp_span_us",
+  ]) {
+    if (typeof step.timing[field] !== "number") {
+      throw new Error(`${label} is missing ${field}: ${JSON.stringify(step)}`);
+    }
+  }
+}
+
+function snapshotRef(text, accessibleName) {
+  const line = String(text)
+    .split("\n")
+    .find((candidate) => candidate.includes(`"${accessibleName}"`));
+  const ref = line?.match(/@e\d+/)?.[0];
+  if (!ref) {
+    throw new Error(`Snapshot did not contain a ref for ${accessibleName}: ${text}`);
+  }
+  return ref;
 }
 
 function checked(command, args, options) {
@@ -959,9 +1449,12 @@ class DevTools {
   }
 
   async createTarget(url) {
-    const client = await this.browser();
-    const result = await client.send("Target.createTarget", { url });
-    return result.targetId;
+    const response = await fetch(`${this.baseUrl}/json/new?${encodeURIComponent(url)}`, {
+      method: "PUT",
+    });
+    if (!response.ok) throw new Error(`DevTools new-target endpoint failed: ${response.status}`);
+    const target = await response.json();
+    return target.id;
   }
 
   async closeTarget(targetId) {

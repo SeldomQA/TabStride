@@ -1,0 +1,8 @@
+name: actionability-flow-timeout-timing
+timeout: 10s
+
+steps:
+  - click:
+      target:
+        testId: never-enabled
+      timeout_ms: 400

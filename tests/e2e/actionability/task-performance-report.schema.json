@@ -128,7 +128,10 @@
         "session_stop_ms",
         "cli_process_count",
         "rpc_count",
+        "metric_record_count",
+        "ws_step_count",
         "snapshot_request_count",
+        "merged_snapshot_count",
         "full_ax_tree_calls",
         "cdp_calls",
         "baseline_p95_ms",
@@ -167,7 +170,16 @@
         "rpc_count": {
           "$ref": "#/$defs/countSummary"
         },
+        "metric_record_count": {
+          "$ref": "#/$defs/countSummary"
+        },
+        "ws_step_count": {
+          "$ref": "#/$defs/countSummary"
+        },
         "snapshot_request_count": {
+          "$ref": "#/$defs/countSummary"
+        },
+        "merged_snapshot_count": {
           "$ref": "#/$defs/countSummary"
         },
         "full_ax_tree_calls": {
@@ -220,9 +232,12 @@
         "session_stop_ms",
         "cli_process_count",
         "rpc_count",
+        "metric_record_count",
         "flow_count",
         "flow_step_count",
+        "ws_step_count",
         "snapshot_request_count",
+        "merged_snapshot_count",
         "full_ax_tree_calls",
         "cdp_calls",
         "locator_cache_hit_rate",
@@ -268,6 +283,10 @@
           "type": "integer",
           "minimum": 1
         },
+        "metric_record_count": {
+          "type": "integer",
+          "minimum": 1
+        },
         "flow_count": {
           "type": "integer",
           "minimum": 0
@@ -276,7 +295,15 @@
           "type": "integer",
           "minimum": 0
         },
+        "ws_step_count": {
+          "type": "integer",
+          "minimum": 0
+        },
         "snapshot_request_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "merged_snapshot_count": {
           "type": "integer",
           "minimum": 0
         },

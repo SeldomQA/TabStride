@@ -1,0 +1,9 @@
+name: actionability-flow-failure-timing
+timeout: 10s
+
+steps:
+  - click:
+      target:
+        text: Duplicate target
+        exact: true
+      timeout_ms: 1000

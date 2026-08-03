@@ -6,13 +6,16 @@ steps:
       target:
         testId: baseline-name
       value: Baseline customer
+      page_update: none
   - select:
       target:
         testId: baseline-kind
       values: [priority]
+      page_update: none
   - click:
       target:
         testId: baseline-submit
+      page_update: none
 
 assertions:
   - target:

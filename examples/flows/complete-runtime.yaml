@@ -4,10 +4,14 @@ name: complete-flow-runtime
 timeout: 2m
 
 steps:
+  # Establish the exact baseline required by a later page_update: delta.
+  - snapshot: {}
+
   - select:
       target:
         label: Country
       values: [SG]
+      page_update: delta
 
   # wait_for is Web-first: it observes page changes and re-resolves the
   # original Locator until the requested state passes or times out.
