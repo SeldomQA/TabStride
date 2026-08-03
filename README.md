@@ -206,9 +206,23 @@ or bounded geometry checks while the target's actionability state changes.
 Timeout errors include machine-readable `reason`, `failed_check`, `elapsed_ms`, and `last_state`
 fields when using `--json`.
 
-Every `click`, `fill`, `press`, and `select` result also includes `document_changed` (boolean) and
-`document_version` (integer) so the agent can skip redundant snapshots: when `document_changed` is
-`false`, current snapshot refs remain valid and no re-snapshot is needed before the next interaction.
+Every `click`, `fill`, `press`, and `select` accepts `--page-update none|signal|delta`:
+
+```bash
+tabstride click --role button --name Save --session "$session_id" --page-update delta
+```
+
+- `signal` (default) returns `document_changed`, `document_change_known`, and `document_version`
+  without fetching the AX tree.
+- `none` skips post-action page observation for the lowest overhead.
+- `delta` returns `snapshot_delta` when an exact cached Snapshot baseline exists. Its status is
+  `available`, `unchanged`, `full_required`, or `delta_unavailable`. An available result includes
+  added Snapshot text and `removed_refs`; use a normal Snapshot after `full_required` or
+  `delta_unavailable`.
+
+JSON output preserves these structured fields. Human output prints the change state and Delta
+status, followed by the incremental Snapshot text when available. An old extension that does not
+support Delta is reported as `delta_unavailable` rather than an empty change.
 
 ### Assert page state with Auto Wait
 
@@ -244,12 +258,21 @@ immediate and intentionally skips evidence collection.
 
 ### Persistent Agent client
 
-Agent harnesses that can keep a child process alive should use `tabstride client`. It performs one
+Choose the execution path before starting browser work:
+
+- Deterministic task: attach (optionally with the initial Snapshot) → one `flow.run` → stop.
+- Adaptive task: keep one `tabstride client` process alive for attach, decision-point requests,
+  Snapshot/Delta updates, and stop.
+
+Do not run status/doctor/browsers as a readiness preflight. A Flow is one Agent request to the
+daemon, but the daemon still dispatches one extension WebSocket request per browser Step.
+
+Agent harnesses performing adaptive work should use `tabstride client`. It performs one
 authenticated WebSocket handshake with `tabstride serve`, then accepts newline-delimited protocol
 requests on stdin and writes correlated responses to stdout:
 
 ```text
-{"id":"start-1","method":"session.start","params":{"mode":"attach","tab":"active"}}
+{"id":"start-1","method":"session.start","params":{"mode":"attach","tab":"active","snapshot":true}}
 {"id":"snap-1","method":"tool.snapshot","params":{"session_id":"abcd"}}
 {"id":"stop-1","method":"session.stop","params":{"session_id":"abcd"}}
 ```
@@ -258,6 +281,11 @@ Requests may be pipelined and cancelled by request id. The connection sends hear
 duplicate in-flight ids, and cleans up requests and sessions it created when the client disconnects.
 The `/agent` endpoint listens only on localhost and requires the random capability stored in the
 user-only daemon info file; `tabstride client` handles this handshake automatically.
+
+Consume an available Snapshot Delta directly. Run `tool.snapshot` only for `full_required`,
+`delta_unavailable`, a missing Delta from an older extension, or
+`document_change_known=false`. A `user_aborted` response ends the task immediately: do not retry
+or create a replacement attach session until the user submits a new request.
 
 ### Batch repeatable work with Flow
 
@@ -272,13 +300,31 @@ tabstride flow run examples/flows/todomvc.yaml --session "$session_id" --var tas
 Flow v1 supports `navigate`, `click`, `fill`, `press`, `select`, `wait_for`, `request_help`,
 `assert`, `snapshot`, and daemon-side `wait_ms` steps.
 Steps run in order through the same session queue as individual CLI commands; the first failure
-stops the flow and reports the failed step plus completed-step timings. Each completed step includes
-a `timing` breakdown (`queue_us`, `websocket_us`, `extension_us`, `cdp_us`) for diagnosing slow
-steps; use `--format json` to inspect it. A total `timeout` and each
+stops the flow and reports both completed-step timings and a structured `failed_step_result` for
+the step that failed, timed out, or was interrupted. Every started browser step includes a `timing`
+breakdown; daemon-local steps such as `wait_ms` report `local_us` without fabricated WebSocket/CDP
+phases. If cancellation wins before extension Timing returns, `local_us` preserves the duration the
+daemon actually observed. Use `--json` to inspect the complete failure payload.
+`websocket_us` is request plus response transport only, while `websocket_roundtrip_us` also includes
+extension execution. `extension_us` is the extension total and `extension_non_cdp_us` removes the
+sum of individual CDP calls. `cdp_us` is that call-by-call sum; `cdp_span_us` is the diagnostic span
+from the first CDP start to the last finish and may include waits between calls. A total `timeout` and each
 tool's `timeout_ms` are independent, and Ctrl+C cancels the active step and the remaining flow.
 Flow targets use the same Locator object and execution path as individual commands. For example,
 `target: { role: button, name: Save, exact: true }` has identical matching, errors, scope, and
 timeout behavior.
+
+Flow interaction steps also accept the same `page_update` field:
+
+```yaml
+- click:
+    target: { role: button, name: Save, exact: true }
+    page_update: delta
+```
+
+Use `none` for predetermined intermediate steps that use stable semantic locators, keep the
+default `signal` when only a change decision is needed, and request `delta` only after establishing
+a Snapshot baseline when the returned page structure will drive the next decision.
 
 Use `wait_for` for page readiness instead of a fixed delay. It re-resolves the original Locator
 until it becomes `attached`, `detached`, `visible`, `hidden`, `enabled`, `disabled`, `editable`,
@@ -319,6 +365,8 @@ scripts are never included in request logs.
 Run `tabstride <business-command> --timing` to print CLI startup, IPC connect, queue wait,
 WebSocket, extension dispatch, CDP, and total Runtime in microseconds. Historical timings are
 available with `tabstride metrics summary` and `tabstride metrics export --out metrics.json`.
+Flow metrics can be isolated by name and step, for example
+`tabstride metrics summary --flow checkout --step-index 2`.
 For repeated observation, `snapshot --incremental` uses the document-version cache and returns only
 accessibility-tree changes.
 
@@ -366,6 +414,9 @@ The repository is a Cargo + pnpm workspace:
 - `crates/tabstride-protocol` — shared wire types and JSON schemas
 - `apps/extension` — browser extension
 - `packages/ui` and `packages/i18n` — shared extension UI support
+
+Release details, compatibility boundaries, and upgrade/rollback instructions are in the
+[0.2.0 release notes](docs/release-notes-0.2.0.md).
 
 ## License
 

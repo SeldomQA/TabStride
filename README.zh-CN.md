@@ -180,9 +180,21 @@ tabstride select --test-id country --value SG --session "$session_id"
 `--json` 时，超时错误包含 `reason`、`failed_check`、`elapsed_ms` 和 `last_state`
 等机器可读字段。
 
-每个 `click`、`fill`、`press`、`select` 的结果还包含 `document_changed`（布尔）和
-`document_version`（整数），供 Agent 跳过多余的 Snapshot：当 `document_changed` 为
-`false` 时，当前 Snapshot ref 仍然有效，下一次交互前无需重新获取快照。
+每个 `click`、`fill`、`press`、`select` 都支持 `--page-update none|signal|delta`：
+
+```bash
+tabstride click --role button --name 保存 --session "$session_id" --page-update delta
+```
+
+- `signal`（默认）返回 `document_changed`、`document_change_known` 和 `document_version`，
+  但不获取 AX Tree；
+- `none` 跳过动作后的页面观察，固定步骤可用它获得最低开销；
+- `delta` 在存在精确匹配的 Snapshot 缓存基线时返回 `snapshot_delta`。状态包括
+  `available`、`unchanged`、`full_required` 和 `delta_unavailable`。`available` 会携带新增
+  Snapshot 文本与 `removed_refs`；后两种状态需要回退到普通 Snapshot。
+
+JSON 输出会保留完整结构化字段；human 输出会显示变化状态和 Delta 状态，并在可用时继续打印增量
+Snapshot 文本。旧扩展不支持 Delta 时会明确显示 `delta_unavailable`，不会伪装成空变化。
 
 ### 使用 Auto Wait 断言页面状态
 
@@ -216,11 +228,19 @@ tabstride --json assert --css '#save' --visible --session "$session_id"
 
 ### 持久 Agent Client
 
-能够长期保持子进程的 Agent harness 应使用 `tabstride client`。它只与 `tabstride serve` 完成一次
+开始浏览器操作前先选择执行路径：
+
+- 确定性任务：attach（按需合并初始 Snapshot）→ 一个 `flow.run` → stop；
+- 自适应任务：保持一个 `tabstride client` 进程，用它完成 attach、决策点请求、Snapshot/Delta 更新和 stop。
+
+正常任务禁止把 status/doctor/browsers 当作就绪预检。一个 Flow 是一次 Agent 到 daemon 的请求，
+但 daemon 仍会为每个浏览器 Step 分别发送扩展 WebSocket 请求。
+
+执行自适应任务且能够保持子进程的 Agent harness 应使用 `tabstride client`。它只与 `tabstride serve` 完成一次
 经过认证的 WebSocket 握手，随后从 stdin 接收一行一个的协议请求，并将带有对应 ID 的响应写入 stdout：
 
 ```text
-{"id":"start-1","method":"session.start","params":{"mode":"attach","tab":"active"}}
+{"id":"start-1","method":"session.start","params":{"mode":"attach","tab":"active","snapshot":true}}
 {"id":"snap-1","method":"tool.snapshot","params":{"session_id":"abcd"}}
 {"id":"stop-1","method":"session.stop","params":{"session_id":"abcd"}}
 ```
@@ -228,6 +248,10 @@ tabstride --json assert --css '#save' --visible --session "$session_id"
 请求可以流水线提交，也可以通过请求 ID 取消。连接支持心跳、拒绝重复的进行中 ID，并在 Client 断开时
 清理未完成请求及由该连接创建的 Session。`/agent` 只监听 localhost，并要求使用保存在用户专属 daemon
 信息文件中的随机凭证；`tabstride client` 会自动完成认证。
+
+Snapshot Delta 为 `available` 时直接消费；只有 `full_required`、`delta_unavailable`、旧扩展未返回 Delta，
+或 `document_change_known=false` 时才执行 `tool.snapshot`。收到 `user_aborted` 后必须立即结束任务，
+禁止重试或创建替代 attach Session，直到用户发起新的请求。
 
 ### 使用 Flow 批量执行确定步骤
 
@@ -241,11 +265,26 @@ tabstride flow run examples/flows/todomvc.yaml --session "$session_id" --var tas
 
 Flow v1 支持 `navigate`、`click`、`fill`、`press`、`select`、`wait_for`、
 `request_help`、`assert`、`snapshot` 和 daemon 本地的 `wait_ms`。
-所有步骤按顺序复用单条命令使用的同一个 Session 队列；第一步失败后立即停止，并返回失败步骤及已完成
-步骤的耗时。每个已完成步骤包含 `timing` 分阶段耗时（`queue_us`、`websocket_us`、
-`extension_us`、`cdp_us`），用于诊断慢步骤；使用 `--format json` 查看。Flow 总 `timeout` 与各工具的 `timeout_ms` 独立生效，Ctrl+C 会取消当前步骤和剩余 Flow。
+所有步骤按顺序复用单条命令使用的同一个 Session 队列；第一步失败后立即停止，并返回已完成步骤耗时，
+以及失败、超时或中断步骤的结构化 `failed_step_result`。每个已开始的浏览器步骤都包含 `timing`；
+`wait_ms` 等 daemon 本地步骤只返回 `local_us`，不会伪造 WebSocket/CDP 阶段；如果用户取消早于扩展 Timing 返回，`local_us` 保留 daemon 实际观察到的步骤耗时。使用 `--json` 查看完整失败数据。
+`websocket_us` 只包含请求与响应的双向传输，`websocket_roundtrip_us` 还包含扩展执行；
+`extension_us` 是扩展总耗时，`extension_non_cdp_us` 会扣除逐次 CDP 调用之和；`cdp_us`
+是各次 CDP 调用耗时累计，`cdp_span_us` 是第一次 CDP 开始到最后一次结束的诊断跨度，可能包含调用间等待。
+Flow 总 `timeout` 与各工具的 `timeout_ms` 独立生效，Ctrl+C 会取消当前步骤和剩余 Flow。
 Flow 与单条 CLI 命令使用相同的 Locator 对象和执行路径。例如
 `target: { role: button, name: 保存, exact: true }` 的匹配规则、错误、作用域和超时行为完全一致。
+
+Flow 的交互步骤也支持同一个 `page_update` 字段：
+
+```yaml
+- click:
+    target: { role: button, name: 保存, exact: true }
+    page_update: delta
+```
+
+使用稳定语义 Locator 的确定性中间步骤可选 `none`；只需要判断页面是否变化时保留默认 `signal`；
+只有已经建立 Snapshot 基线、且下一步决策需要新页面结构时才请求 `delta`。
 
 页面就绪应优先使用 `wait_for`，而不是固定延时。它会反复按原始 Locator 重新解析，直到目标达到
 `attached`、`detached`、`visible`、`hidden`、`enabled`、`disabled`、`editable`、
@@ -282,6 +321,7 @@ INFO 级别不记录健康检查请求；表单值、页面内容、选择器和
 使用 `tabstride <业务命令> --timing` 可输出 CLI 启动、IPC 连接、队列等待、
 WebSocket、扩展 dispatch、CDP 和总 Runtime，单位均为微秒。历史数据可通过
 `tabstride metrics summary` 汇总，或用 `tabstride metrics export --out metrics.json` 导出。
+Flow 指标可按名称和步骤过滤，例如 `tabstride metrics summary --flow checkout --step-index 2`。
 重复观察页面时，可使用 `snapshot --incremental` 复用 Document Version 缓存并只返回 AX 树变化。
 
 ## 工作原理
@@ -325,6 +365,8 @@ Agent 不直接与浏览器通信。它通过 `tabstride` CLI 下发浏览器任
 - `crates/tabstride-protocol` — 共享协议类型与 JSON Schema
 - `apps/extension` — 浏览器扩展
 - `packages/ui` 和 `packages/i18n` — 扩展 UI 共享支持
+
+版本能力、兼容边界以及升级/回滚步骤见 [0.2.0 发布说明](docs/release-notes-0.2.0.md)。
 
 ## 许可证
 
