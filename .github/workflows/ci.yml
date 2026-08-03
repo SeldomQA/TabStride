@@ -37,6 +37,9 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace --locked
 
+      - name: Check generated protocol schemas
+        run: cargo run -p tabstride-protocol --bin dump-schema --locked -- --check
+
   frontend:
     name: Frontend lint, typecheck, tests, build
     runs-on: ubuntu-latest
@@ -106,7 +109,12 @@ jobs:
         name: Install Chrome for Testing
         uses: browser-actions/setup-chrome@v2
 
-      - name: Run real Chrome Actionability suite
-        run: pnpm e2e:chrome
+      - name: Run real Chrome fast-path and hot-path regression suite
+        run: pnpm test:chrome
+        env:
+          TABSTRIDE_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+
+      - name: Run complete single-task performance regression
+        run: pnpm perf:task
         env:
           TABSTRIDE_CHROME: ${{ steps.chrome.outputs.chrome-path }}

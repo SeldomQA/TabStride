@@ -12,6 +12,7 @@
     "perf:chrome": "node scripts/actionability-chrome-e2e.mjs --prepare --mode benchmark --report artifacts/actionability-performance.json",
     "perf:task": "node scripts/actionability-chrome-e2e.mjs --prepare --mode task-baseline --task-report artifacts/single-task-performance.json",
     "test:chrome": "node scripts/actionability-chrome-e2e.mjs --prepare --mode all --report artifacts/actionability-performance.json",
+    "schema:check": "cargo run -p tabstride-protocol --bin dump-schema --locked -- --check",
     "lint": "biome check . && stylelint \"**/*.css\"",
     "format": "biome format --write ."
   },
