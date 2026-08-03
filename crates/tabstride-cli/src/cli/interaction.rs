@@ -306,9 +306,15 @@ pub struct FillArgs {
     #[arg(value_name = "TARGET")]
     pub target: Option<String>,
 
-    /// Text to type into the element.
+    /// Text to type into the element. Pass an empty string (e.g.
+    /// `--value=`) or use `--clear` to clear the field.
     #[arg(long)]
-    pub value: String,
+    pub value: Option<String>,
+
+    /// Clear the field (equivalent to `--value=`). Conflicts with
+    /// `--value` and `--no-clear`.
+    #[arg(long)]
+    pub clear: bool,
 
     #[command(flatten)]
     pub locator: LocatorFlags,
@@ -331,14 +337,34 @@ pub struct FillArgs {
     pub page_update: CliPageUpdate,
 }
 
+/// Resolve the effective fill value from `--value` / `--clear`.
+fn resolve_fill_value(args: &FillArgs) -> Result<String, CliError> {
+    match (&args.value, args.clear) {
+        (Some(value), false) => Ok(value.clone()),
+        (None, true) => Ok(String::new()),
+        (Some(_), true) => Err(CliError::Local(anyhow::anyhow!(
+            "--clear conflicts with --value; pass one or the other"
+        ))),
+        (None, false) => Err(CliError::Local(anyhow::anyhow!(
+            "missing value: pass --value <text> to type, or --clear to empty the field"
+        ))),
+    }
+}
+
 pub fn dispatch_fill(args: FillArgs, format: Format) -> Result<(), CliError> {
     let info = ensure_daemon().context("ensure daemon is running")?;
+    if args.clear && args.no_clear {
+        return Err(CliError::Local(anyhow::anyhow!(
+            "--clear conflicts with --no-clear"
+        )));
+    }
+    let value = resolve_fill_value(&args)?;
     let target = build_locator(args.target.clone(), &args.locator, true)?
         .expect("required locator must be present");
     let page_update = PageUpdateMode::from(args.page_update);
     let params = FillParams {
         session_id: args.session.clone(),
-        value: args.value.clone(),
+        value,
         target,
         tab_id: args.tab_id,
         clear_before: if args.no_clear { Some(false) } else { None },
@@ -867,8 +893,71 @@ mod tests {
             Wrapper::try_parse_from(["fill", "@e138", "--value", "deepseek", "--session", "ohli"])
                 .expect("fill args should parse");
         assert_eq!(parsed.args.target.as_deref(), Some("@e138"));
-        assert_eq!(parsed.args.value, "deepseek");
+        assert_eq!(parsed.args.value.as_deref(), Some("deepseek"));
         assert_eq!(parsed.args.session, "ohli");
+        assert_eq!(resolve_fill_value(&parsed.args).expect("value"), "deepseek");
+    }
+
+    #[test]
+    fn fill_clear_flag_resolves_to_empty_value() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        #[command(name = "fill")]
+        struct Wrapper {
+            #[command(flatten)]
+            args: FillArgs,
+        }
+
+        let parsed = Wrapper::try_parse_from(["fill", "@e138", "--clear", "--session", "ohli"])
+            .expect("fill --clear should parse");
+        assert!(parsed.args.clear);
+        assert_eq!(resolve_fill_value(&parsed.args).expect("value"), "");
+    }
+
+    #[test]
+    fn fill_inline_empty_value_flag_resolves_to_empty_string() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        #[command(name = "fill")]
+        struct Wrapper {
+            #[command(flatten)]
+            args: FillArgs,
+        }
+
+        let parsed = Wrapper::try_parse_from(["fill", "@e138", "--value=", "--session", "ohli"])
+            .expect("fill --value= should parse");
+        assert_eq!(resolve_fill_value(&parsed.args).expect("value"), "");
+    }
+
+    #[test]
+    fn fill_rejects_clear_combined_with_value_and_requires_one_of_them() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        #[command(name = "fill")]
+        struct Wrapper {
+            #[command(flatten)]
+            args: FillArgs,
+        }
+
+        let conflict = Wrapper::try_parse_from([
+            "fill",
+            "@e138",
+            "--clear",
+            "--value",
+            "x",
+            "--session",
+            "ohli",
+        ])
+        .expect("parse succeeds; conflict detected at resolve time");
+        assert!(resolve_fill_value(&conflict.args).is_err());
+
+        let missing = Wrapper::try_parse_from(["fill", "@e138", "--session", "ohli"])
+            .expect("fill without value should parse");
+        let err = resolve_fill_value(&missing.args).expect_err("neither --value nor --clear");
+        assert!(err.to_string().contains("--clear"));
     }
 
     #[test]

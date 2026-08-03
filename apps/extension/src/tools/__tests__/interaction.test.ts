@@ -598,6 +598,42 @@ describe("handleFill", () => {
     expect(callFns.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("clears a field when fill value is an empty string", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const ctx = await sm.start("aa11");
+    ctx.refStore.set("e1", 555, { tabId: 4 });
+    const fake = makeFakeCdp({
+      "DOM.describeNode": () => ({
+        node: { backendNodeId: 555, nodeName: "INPUT", attributes: ["type", "text"] },
+      }),
+      "DOM.scrollIntoViewIfNeeded": () => ({}),
+      "DOM.focus": () => ({}),
+      "DOM.resolveNode": () => ({ object: { objectId: "obj-1" } }),
+      "Runtime.callFunctionOn": () => ({ result: { type: "undefined" } }),
+      "Input.insertText": () => ({}),
+    });
+    const res = await handleFill(
+      sm,
+      { session_id: "aa11", target: { ref: "e1" }, value: "" },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    if ("code" in res) throw new Error(`unexpected error: ${JSON.stringify(res)}`);
+    // Empty value clears the field: wipe fires `input`, and insertText
+    // receives an empty string.
+    expect(res.value_length).toBe(0);
+    const insert = fake.sent.find((c) => c.method === "Input.insertText");
+    expect(insert?.params).toEqual({ text: "" });
+    const callFns = fake.sent.filter(
+      (c) => c.method === "Runtime.callFunctionOn" && !isActionabilityCall(c),
+    );
+    const wipe = callFns.find((c) =>
+      String((c.params as { functionDeclaration?: string }).functionDeclaration).includes(
+        "this.textContent = ''",
+      ),
+    );
+    expect(wipe).toBeDefined();
+  });
+
   it("clear_before=false skips the wipe call", async () => {
     const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
     const ctx = await sm.start("aa11");

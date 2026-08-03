@@ -395,7 +395,7 @@ business/session request, or when the user explicitly requests diagnostics.
 | Command | Summary |
 |---------|---------|
 | `tabstride click <ref-or-css>` | Click one strict target; also accepts semantic locator flags (`--button`, `--click-count`, `--modifiers`). Automatically hovers the parent element when the target is hidden by CSS `:hover` (e.g. destroy buttons, dropdown menus) — no separate hover command needed. |
-| `tabstride fill <ref-or-css> --value <text>` | Clear and type into one strict target; also accepts semantic locator flags |
+| `tabstride fill <ref-or-css> --value <text>` | Clear and type into one strict target; also accepts semantic locator flags. To clear a field use `--clear` (or `--value=` with an empty string) |
 | `tabstride select <ref-or-css> --value <v>` | Set one strict `<select>` target by `value`; repeat `--value` for multi-select |
 | `tabstride press <key>` | Key/combo (`Enter`, `Ctrl+A`, …); optional ref, CSS, or semantic locator focuses one target first |
 | `tabstride assert` | Web-first assertion with Auto Wait; supports element state/count and URL equality/regex |
@@ -414,6 +414,7 @@ Locator examples:
 ```
 tabstride click --role button --name Save --exact --session <id>
 tabstride fill --label Email --value agent@example.com --session <id>
+tabstride fill --css ".search" --clear --session <id>
 tabstride assert --text "Write code" --exact --visible --session <id>
 tabstride assert --css '.todo.completed' --count 3 --session <id>
 tabstride press Enter --placeholder "Add a task" --session <id>
