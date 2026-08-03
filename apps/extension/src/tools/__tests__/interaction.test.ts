@@ -1125,6 +1125,7 @@ describe("document_changed in interaction results", () => {
     );
     if ("code" in res) throw new Error(JSON.stringify(res));
     expect(res.document_changed).toBe(true);
+    expect(res.document_change_known).toBe(true);
     expect(res.document_version).toBe(6);
   });
 
@@ -1145,6 +1146,7 @@ describe("document_changed in interaction results", () => {
     );
     if ("code" in res) throw new Error(JSON.stringify(res));
     expect(res.document_changed).toBe(false);
+    expect(res.document_change_known).toBe(true);
     expect(res.document_version).toBe(3);
   });
 
@@ -1178,6 +1180,7 @@ describe("document_changed in interaction results", () => {
     );
     if ("code" in res) throw new Error(JSON.stringify(res));
     expect(res.document_changed).toBe(true);
+    expect(res.document_change_known).toBe(true);
     expect(res.document_version).toBe(11);
   });
 
@@ -1196,6 +1199,7 @@ describe("document_changed in interaction results", () => {
     // PressResult has a `code` field (key code), so use `message` to detect RpcError.
     if ("message" in res) throw new Error(JSON.stringify(res));
     expect(res.document_changed).toBe(false);
+    expect(res.document_change_known).toBe(true);
     expect(res.document_version).toBe(7);
   });
 
@@ -1237,6 +1241,7 @@ describe("document_changed in interaction results", () => {
     );
     if ("code" in res) throw new Error(JSON.stringify(res));
     expect(res.document_changed).toBe(true);
+    expect(res.document_change_known).toBe(true);
     expect(res.document_version).toBe(21);
   });
 
@@ -1258,8 +1263,371 @@ describe("document_changed in interaction results", () => {
       { cdp: fake.cdp, tabsApi: fake.tabsApi },
     );
     if ("code" in res) throw new Error(JSON.stringify(res));
-    // Should still succeed — document-change fields degrade to false/undefined.
+    // The action still succeeds, but false is explicitly non-authoritative.
     expect(res.document_changed).toBe(false);
+    expect(res.document_change_known).toBe(false);
     expect(res.document_version).toBeUndefined();
+  });
+
+  it("reports unknown when only the post-action identity is available", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const ctx = await sm.start("aa11");
+    ctx.refStore.set("e3", 1234, { tabId: 4 });
+    let identityReads = 0;
+    const fake = makeFakeCdp({
+      "DOM.scrollIntoViewIfNeeded": () => ({}),
+      "DOM.getContentQuads": () => ({ quads: [[10, 20, 110, 20, 110, 60, 10, 60]] }),
+      "Input.dispatchMouseEvent": () => ({}),
+      "Runtime.evaluate": (params: unknown) => {
+        const expression = String((params as { expression?: string })?.expression ?? "");
+        if (expression.includes("__tabstrideDocumentVersion")) {
+          identityReads += 1;
+          return {
+            result: {
+              value: identityReads === 1 ? null : { id: "doc-after", version: 2 },
+            },
+          };
+        }
+        return { result: { value: { overlayHostPresent: false, overlayHostConnected: false } } };
+      },
+    });
+
+    const res = await handleClick(
+      sm,
+      { session_id: "aa11", target: { ref: "@e3" } },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    if ("code" in res) throw new Error(JSON.stringify(res));
+    expect(res.document_changed).toBe(false);
+    expect(res.document_change_known).toBe(false);
+    expect(res.document_version).toBe(2);
+  });
+
+  it("treats a new document id with the same version as changed", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const ctx = await sm.start("aa11");
+    ctx.refStore.set("e3", 1234, { tabId: 4 });
+    let identityReads = 0;
+    const fake = makeFakeCdp({
+      "DOM.scrollIntoViewIfNeeded": () => ({}),
+      "DOM.getContentQuads": () => ({ quads: [[10, 20, 110, 20, 110, 60, 10, 60]] }),
+      "Input.dispatchMouseEvent": () => ({}),
+      "Runtime.evaluate": (params: unknown) => {
+        const expression = String((params as { expression?: string })?.expression ?? "");
+        if (expression.includes("__tabstrideDocumentVersion")) {
+          identityReads += 1;
+          return {
+            result: {
+              value: { id: identityReads === 1 ? "document-before" : "document-after", version: 1 },
+            },
+          };
+        }
+        return { result: { value: { overlayHostPresent: false, overlayHostConnected: false } } };
+      },
+    });
+
+    const res = await handleClick(
+      sm,
+      { session_id: "aa11", target: { ref: "@e3" } },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    if ("code" in res) throw new Error(JSON.stringify(res));
+    expect(res.document_changed).toBe(true);
+    expect(res.document_change_known).toBe(true);
+    expect(res.document_version).toBe(1);
+  });
+
+  it("waits one browser task turn for an asynchronously queued mutation", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const ctx = await sm.start("aa11");
+    ctx.refStore.set("e3", 1234, { tabId: 4 });
+    let version = 1;
+    const fake = makeFakeCdp({
+      "DOM.scrollIntoViewIfNeeded": () => ({}),
+      "DOM.getContentQuads": () => ({ quads: [[10, 20, 110, 20, 110, 60, 10, 60]] }),
+      "Input.dispatchMouseEvent": () => ({}),
+      "Runtime.evaluate": (params: unknown) => {
+        const expression = String((params as { expression?: string })?.expression ?? "");
+        if (expression.includes("__tabstrideDocumentVersion")) {
+          return { result: { value: { id: "doc-1", version } } };
+        }
+        if (expression.includes("setTimeout(resolve, 0)")) {
+          version = 2;
+          return { result: { value: undefined } };
+        }
+        return { result: { value: { overlayHostPresent: false, overlayHostConnected: false } } };
+      },
+    });
+
+    const res = await handleClick(
+      sm,
+      { session_id: "aa11", target: { ref: "@e3" } },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    if ("code" in res) throw new Error(JSON.stringify(res));
+    expect(res.document_changed).toBe(true);
+    expect(res.document_change_known).toBe(true);
+    expect(res.document_version).toBe(2);
+  });
+
+  it("includes target focus mutations in press change detection", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const ctx = await sm.start("aa11");
+    ctx.refStore.set("e1", 999, { tabId: 4 });
+    let version = 1;
+    const fake = makeFakeCdp({
+      "DOM.scrollIntoViewIfNeeded": () => ({}),
+      "DOM.focus": () => {
+        version = 2;
+        return {};
+      },
+      "Input.dispatchKeyEvent": () => ({}),
+      "Runtime.evaluate": (params: unknown) => {
+        const expression = String((params as { expression?: string })?.expression ?? "");
+        if (expression.includes("__tabstrideDocumentVersion")) {
+          return { result: { value: { id: "doc-1", version } } };
+        }
+        return { result: { value: null } };
+      },
+    });
+
+    const res = await handlePress(
+      sm,
+      { session_id: "aa11", key: "Enter", target: { ref: "e1" } },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    if ("message" in res) throw new Error(JSON.stringify(res));
+    expect(res.document_changed).toBe(true);
+    expect(res.document_change_known).toBe(true);
+    expect(res.document_version).toBe(2);
+  });
+
+  it("keeps attach change detection scoped to the leased tab", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const ctx = sm.startAttached("aa11", 77, 9);
+    ctx.refStore.set("e3", 1234, { tabId: 77 });
+    const fake = makeFakeCdp({
+      "DOM.scrollIntoViewIfNeeded": () => ({}),
+      "DOM.getContentQuads": () => ({ quads: [[10, 20, 110, 20, 110, 60, 10, 60]] }),
+      "Input.dispatchMouseEvent": () => ({}),
+      "Runtime.evaluate": (params: unknown) => {
+        const expression = String((params as { expression?: string })?.expression ?? "");
+        if (expression.includes("__tabstrideDocumentVersion")) {
+          return { result: { value: { id: "leased-document", version: 4 } } };
+        }
+        return { result: { value: { overlayHostPresent: false, overlayHostConnected: false } } };
+      },
+    });
+    fake.tabsApi.get.mockImplementation(
+      async (tabId: number) => ({ id: tabId, windowId: 9, active: true }) as chrome.tabs.Tab,
+    );
+
+    const res = await handleClick(
+      sm,
+      { session_id: "aa11", tab_id: 77, target: { ref: "@e3" } },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    if ("code" in res) throw new Error(JSON.stringify(res));
+    expect(res.document_changed).toBe(false);
+    expect(res.document_change_known).toBe(true);
+    expect(
+      fake.sent
+        .filter((call) => call.method === "Runtime.evaluate")
+        .every((call) => call.tabId === 77),
+    ).toBe(true);
+  });
+});
+
+describe("optional Snapshot delta after interactions", () => {
+  async function clickWithPageUpdate(
+    pageUpdate: "none" | "signal" | "delta" | undefined,
+    runtimeEvaluate: (params: unknown) => unknown,
+    extraHandlers: Record<string, (params: unknown) => unknown> = {},
+    prepare?: (ctx: Awaited<ReturnType<SessionManager["start"]>>) => void,
+  ) {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const ctx = await sm.start("aa11");
+    ctx.refStore.set("e3", 1234, { tabId: 4 });
+    prepare?.(ctx);
+    const fake = makeFakeCdp({
+      "DOM.scrollIntoViewIfNeeded": () => ({}),
+      "DOM.getContentQuads": () => ({ quads: [[10, 20, 110, 20, 110, 60, 10, 60]] }),
+      "Input.dispatchMouseEvent": () => ({}),
+      "Runtime.evaluate": runtimeEvaluate,
+      ...extraHandlers,
+    });
+    const result = await handleClick(
+      sm,
+      {
+        session_id: "aa11",
+        target: { ref: "@e3" },
+        ...(pageUpdate === undefined ? {} : { page_update: pageUpdate }),
+      },
+      { cdp: fake.cdp, tabsApi: fake.tabsApi },
+    );
+    if ("code" in result) throw new Error(JSON.stringify(result));
+    return { result, fake };
+  }
+
+  it("keeps signal as the lightweight default without reading the AX tree", async () => {
+    const { result, fake } = await clickWithPageUpdate(undefined, docVersionHandler(3));
+
+    expect(result.document_change_known).toBe(true);
+    expect(result.snapshot_delta).toBeUndefined();
+    expect(fake.sent.some((call) => call.method === "Accessibility.getFullAXTree")).toBe(false);
+  });
+
+  it("skips document identity and Snapshot work in none mode", async () => {
+    const { result, fake } = await clickWithPageUpdate("none", () => ({
+      result: { value: { overlayHostPresent: false, overlayHostConnected: false } },
+    }));
+
+    expect(result).toMatchObject({
+      document_changed: false,
+      document_change_known: false,
+    });
+    expect(result.document_version).toBeUndefined();
+    expect(result.snapshot_delta).toBeUndefined();
+    expect(
+      fake.sent.some(
+        (call) =>
+          call.method === "Runtime.evaluate" &&
+          String((call.params as { expression?: string })?.expression ?? "").includes(
+            "__tabstrideDocumentVersion",
+          ),
+      ),
+    ).toBe(false);
+    expect(fake.sent.some((call) => call.method === "Accessibility.getFullAXTree")).toBe(false);
+  });
+
+  it("returns unchanged without reading the AX tree", async () => {
+    const { result, fake } = await clickWithPageUpdate("delta", docVersionHandler(8));
+
+    expect(result.snapshot_delta).toEqual({
+      status: "unchanged",
+      base_document_version: 8,
+      document_version: 8,
+      removed_refs: [],
+    });
+    expect(fake.sent.some((call) => call.method === "Accessibility.getFullAXTree")).toBe(false);
+  });
+
+  it("requires a full Snapshot when the page changed without a compatible baseline", async () => {
+    let identityReads = 0;
+    const { result, fake } = await clickWithPageUpdate("delta", (params) => {
+      const expression = String((params as { expression?: string })?.expression ?? "");
+      if (expression.includes("__tabstrideDocumentVersion")) {
+        identityReads += 1;
+        return {
+          result: { value: { id: "doc-1", version: identityReads === 1 ? 1 : 2 } },
+        };
+      }
+      return { result: { value: { overlayHostPresent: false, overlayHostConnected: false } } };
+    });
+
+    expect(result.snapshot_delta).toMatchObject({
+      status: "full_required",
+      document_version: 2,
+      reason: expect.stringContaining("no compatible Snapshot baseline"),
+    });
+    expect(fake.sent.some((call) => call.method === "Accessibility.getFullAXTree")).toBe(false);
+  });
+
+  it("requires a full Snapshot after navigation even if versions match", async () => {
+    let identityReads = 0;
+    const { result, fake } = await clickWithPageUpdate("delta", (params) => {
+      const expression = String((params as { expression?: string })?.expression ?? "");
+      if (expression.includes("__tabstrideDocumentVersion")) {
+        identityReads += 1;
+        return {
+          result: {
+            value: { id: identityReads === 1 ? "before" : "after", version: 1 },
+          },
+        };
+      }
+      return { result: { value: { overlayHostPresent: false, overlayHostConnected: false } } };
+    });
+
+    expect(result.snapshot_delta).toMatchObject({
+      status: "full_required",
+      reason: expect.stringContaining("navigation"),
+    });
+    expect(fake.sent.some((call) => call.method === "Accessibility.getFullAXTree")).toBe(false);
+  });
+
+  it("reports delta_unavailable when document identity cannot be observed", async () => {
+    const { result } = await clickWithPageUpdate("delta", () => {
+      throw new Error("Runtime.evaluate unavailable");
+    });
+
+    expect(result.snapshot_delta).toMatchObject({
+      status: "delta_unavailable",
+      reason: expect.stringContaining("identity unavailable"),
+    });
+  });
+
+  it("captures one incremental AX delta when a compatible baseline exists", async () => {
+    let identityReads = 0;
+    const currentTree = [
+      {
+        nodeId: "1",
+        role: { type: "role", value: "RootWebArea" },
+        name: { type: "computedString", value: "Example" },
+        backendDOMNodeId: 100,
+        childIds: ["2"],
+      },
+      {
+        nodeId: "2",
+        parentId: "1",
+        role: { type: "role", value: "button" },
+        name: { type: "computedString", value: "New" },
+        backendDOMNodeId: 200,
+      },
+    ];
+    const { result, fake } = await clickWithPageUpdate(
+      "delta",
+      (params) => {
+        const expression = String((params as { expression?: string })?.expression ?? "");
+        if (expression.includes("__tabstrideDocumentVersion")) {
+          identityReads += 1;
+          return {
+            result: { value: { id: "doc-1", version: identityReads === 1 ? 1 : 2 } },
+          };
+        }
+        return { result: { value: { overlayHostPresent: false, overlayHostConnected: false } } };
+      },
+      {
+        "DOM.getDocument": () => ({ root: { nodeId: 1 } }),
+        "DOM.querySelector": () => ({ nodeId: 0 }),
+        "Accessibility.enable": () => ({}),
+        "Accessibility.getFullAXTree": () => ({ nodes: currentTree }),
+      },
+      (ctx) => {
+        ctx.documentCache.snapshots.set("4::", {
+          document: { id: "doc-1", version: 1 },
+          value: {
+            text: '@e1 RootWebArea "Example"\n  @e3 button "Old"',
+            ref_count: 2,
+            tab_id: 4,
+            snapshot_kind: "full",
+            document_id: "doc-1",
+            document_version: 1,
+            removed_refs: [],
+          },
+        });
+      },
+    );
+
+    expect(result.snapshot_delta).toMatchObject({
+      status: "available",
+      base_document_version: 1,
+      document_version: 2,
+      removed_refs: ["e3"],
+      ref_count: 2,
+    });
+    expect(result.snapshot_delta?.text).toContain('button "New"');
+    expect(fake.sent.filter((call) => call.method === "Accessibility.getFullAXTree")).toHaveLength(
+      1,
+    );
   });
 });

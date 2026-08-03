@@ -15,6 +15,16 @@
         "null"
       ]
     },
+    "page_update": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PageUpdateMode"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "session_id": {
       "type": "string"
     },
@@ -101,6 +111,32 @@
         }
       },
       "additionalProperties": false
+    },
+    "PageUpdateMode": {
+      "description": "Amount of page-state information requested after an interaction.",
+      "oneOf": [
+        {
+          "description": "Skip document identity reads and Snapshot work.",
+          "type": "string",
+          "enum": [
+            "none"
+          ]
+        },
+        {
+          "description": "Return only the lightweight changed/unchanged/unknown signal.",
+          "type": "string",
+          "enum": [
+            "signal"
+          ]
+        },
+        {
+          "description": "Return a Snapshot delta when a compatible baseline exists.",
+          "type": "string",
+          "enum": [
+            "delta"
+          ]
+        }
+      ]
     }
   }
 }

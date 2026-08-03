@@ -14,7 +14,7 @@ use std::process::ExitCode;
 
 use anyhow::Error;
 use serde::Serialize;
-use tabstride_protocol::{ErrorCode, RpcError};
+use tabstride_protocol::{ErrorCode, FlowFailureData, RpcError};
 use thiserror::Error;
 
 use super::render_error;
@@ -249,6 +249,7 @@ pub fn render_with_extras(
             {
                 let _ = writeln!(out, "(failed to render extras: {e})");
             }
+            let _ = write_flow_failure_details(err, &mut out);
             if let Some(h) = hint {
                 let _ = writeln!(out, "hint: {h}");
             }
@@ -263,6 +264,38 @@ pub fn render_with_extras(
         }
     }
     ExitCode::from(exit)
+}
+
+fn write_flow_failure_details(err: &CliError, out: &mut dyn Write) -> std::io::Result<()> {
+    let Some(data) = err.data() else {
+        return Ok(());
+    };
+    let Ok(failure) = serde_json::from_value::<FlowFailureData>(data.clone()) else {
+        return Ok(());
+    };
+    writeln!(out, "flow: {}", failure.flow_name)?;
+    if let Some(step) = failure.failed_step_result {
+        writeln!(
+            out,
+            "fail  {:>2}  {:<24} {}ms",
+            step.index, step.method, step.duration_ms
+        )?;
+        if let Some(timing) = step.timing {
+            writeln!(
+                out,
+                "      {:>24}  {}",
+                "",
+                super::flow::format_step_timing(&timing)
+            )?;
+        }
+    } else {
+        writeln!(
+            out,
+            "fail  {:>2}  {:<24} not started",
+            failure.failed_step, failure.failed_method
+        )?;
+    }
+    Ok(())
 }
 
 /// Test-only helper that writes the same human-mode output [`render`]
@@ -287,6 +320,7 @@ pub(crate) fn render_human_to_string(err: &CliError, extras: Option<&dyn RenderE
     {
         let _ = writeln!(buf, "(failed to render extras: {e})");
     }
+    let _ = write_flow_failure_details(err, &mut buf);
     if let Some(h) = hint {
         let _ = writeln!(buf, "hint: {h}");
     }
@@ -300,6 +334,7 @@ pub(crate) fn render_human_to_string(err: &CliError, extras: Option<&dyn RenderE
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tabstride_protocol::{FlowStepResult, StepTiming};
 
     #[test]
     fn exit_code_matches_design_table() {
@@ -322,6 +357,41 @@ mod tests {
         // user-error bucket.
         assert_eq!(exit_code_for(ErrorCode::UnknownMethod), 5);
         assert_eq!(exit_code_for(ErrorCode::VersionTooOld), 5);
+    }
+
+    #[test]
+    fn human_error_renders_failed_flow_step_timing() {
+        let failure = FlowFailureData {
+            flow_name: "checkout".into(),
+            failed_step: 2,
+            failed_method: "tool.wait_ms".into(),
+            duration_ms: 25,
+            completed_steps: vec![],
+            failed_step_result: Some(FlowStepResult {
+                index: 2,
+                method: "tool.wait_ms".into(),
+                duration_ms: 20,
+                timing: Some(StepTiming {
+                    local_us: Some(20_000),
+                    ..StepTiming::default()
+                }),
+                output: serde_json::Value::Null,
+            }),
+            cause: RpcError {
+                code: ErrorCode::Timeout,
+                message: "timed out".into(),
+                data: None,
+            },
+        };
+        let error = CliError::from_rpc(RpcError {
+            code: ErrorCode::Timeout,
+            message: "flow failed".into(),
+            data: Some(serde_json::to_value(failure).unwrap()),
+        });
+        let rendered = render_human_to_string(&error, None);
+        assert!(rendered.contains("flow: checkout"));
+        assert!(rendered.contains("tool.wait_ms"));
+        assert!(rendered.contains("local=20.00ms"));
     }
 
     #[test]

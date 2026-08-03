@@ -10,15 +10,21 @@
 //    commands.
 
 import { ChromiumCdp } from "@/browser-driver/chromium-cdp";
-import { readDocumentIdentity } from "@/session-manager/document-cache";
+import {
+  type DocumentIdentity,
+  readDocumentIdentity,
+  sameDocument,
+} from "@/session-manager/document-cache";
 import type { SessionContext, SessionManager } from "@/session-manager/manager";
 import type {
   ClickParams,
   ClickResult,
   FillParams,
   FillResult,
+  InteractionSnapshotDelta,
   KeyModifier,
   MouseButton,
+  PageUpdateMode,
   PressParams,
   PressResult,
   RpcError,
@@ -35,6 +41,7 @@ import {
   scrollNodeIntoView,
 } from "./element-geometry";
 import { rpcError } from "./errors";
+import { captureSessionSnapshot, hasSessionSnapshotBaseline } from "./observation";
 import {
   type CdpRunner,
   type ChromeTabsApi,
@@ -56,38 +63,385 @@ export interface InteractionDeps {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const POST_ACTION_IDENTITY_PROBE_MS = 250;
+const POST_ACTION_IDENTITY_ATTEMPTS = 3;
+const LINK_NAVIGATION_PROBE_ATTEMPTS = 10;
 
 // ---------------------------------------------------------------------------
 // Lightweight document-change detection
 // ---------------------------------------------------------------------------
 
 /**
- * Read the current document version for a tab. Returns `undefined` when
- * CDP is unavailable or the page does not support the instrumentation
- * (non-fatal — callers simply omit the document-change fields).
+ * Wait one browser task turn after an action. This is intentionally not a
+ * fixed sleep: it gives MutationObserver callbacks and framework work queued
+ * by the dispatched event a chance to run while adding only one zero-delay
+ * task to the unchanged path.
  */
-async function readDocVersion(cdp: CdpRunner, tabId: number): Promise<number | undefined> {
-  const identity = await readDocumentIdentity(cdp, tabId);
-  return identity?.version;
+async function settleDocumentChangeTurn(cdp: CdpRunner, tabId: number): Promise<void> {
+  try {
+    await Promise.race([
+      cdp.send(tabId, "Runtime.evaluate", {
+        expression: "new Promise((resolve) => setTimeout(resolve, 0))",
+        awaitPromise: true,
+        returnByValue: true,
+      }),
+      new Promise<void>((resolve) => setTimeout(resolve, POST_ACTION_IDENTITY_PROBE_MS)),
+    ]);
+  } catch {
+    // The following identity read will classify unavailable instrumentation
+    // as unknown, so settling itself remains best-effort.
+  }
 }
 
 /**
- * Compute the page-change fields by comparing a pre-action document
- * version with the post-action version. Returns partial result fields
- * suitable for spreading into the tool result object.
+ * Navigation can destroy a Runtime execution context while an awaited
+ * `Runtime.evaluate` is in flight. Some Chrome versions never settle that
+ * debugger promise. Bound each post-action probe and retry against the new
+ * document so a successful click cannot turn into a daemon-level timeout.
+ */
+async function readPostActionDocumentIdentity(
+  cdp: CdpRunner,
+  tabId: number,
+): Promise<DocumentIdentity | null> {
+  for (let attempt = 0; attempt < POST_ACTION_IDENTITY_ATTEMPTS; attempt += 1) {
+    const identity = await Promise.race([
+      readDocumentIdentity(cdp, tabId),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), POST_ACTION_IDENTITY_PROBE_MS),
+      ),
+    ]);
+    if (identity) return identity;
+  }
+  return null;
+}
+
+async function readTabUrl(tabsApi: ChromeTabsApi, tabId: number): Promise<string | undefined> {
+  try {
+    return (await tabsApi.get(tabId)).url;
+  } catch {
+    return undefined;
+  }
+}
+
+async function linkSchedulesCurrentTabNavigation(
+  cdp: CdpRunner,
+  tabId: number,
+  backendNodeId: number,
+  currentUrl: string | undefined,
+): Promise<boolean> {
+  try {
+    const described = await cdp.send<{ node?: { nodeName?: string; attributes?: string[] } }>(
+      tabId,
+      "DOM.describeNode",
+      { backendNodeId },
+    );
+    if (described.node?.nodeName?.toUpperCase() !== "A") return false;
+    const attributes = described.node.attributes ?? [];
+    const attribute = (name: string) => {
+      for (let index = 0; index + 1 < attributes.length; index += 2) {
+        if (attributes[index]?.toLowerCase() === name) return attributes[index + 1];
+      }
+      return undefined;
+    };
+    const href = attribute("href");
+    if (!href || href.trim().toLowerCase().startsWith("javascript:")) return false;
+    if (attribute("target")?.toLowerCase() === "_blank" || attribute("download") !== undefined) {
+      return false;
+    }
+    if (!currentUrl) return true;
+    return new URL(href, currentUrl).href !== currentUrl;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForNavigationFallback(
+  tabsApi: ChromeTabsApi,
+  tabId: number,
+  urlBefore: string | undefined,
+  navigationOccurred?: () => boolean,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < LINK_NAVIGATION_PROBE_ATTEMPTS; attempt += 1) {
+    if (navigationOccurred?.()) return true;
+    const tabUrlAfter = await readTabUrl(tabsApi, tabId);
+    if (urlBefore && tabUrlAfter && tabUrlAfter !== urlBefore) return true;
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  }
+  if (navigationOccurred?.()) return true;
+  const finalTabUrl = await readTabUrl(tabsApi, tabId);
+  return Boolean(urlBefore && finalTabUrl && finalTabUrl !== urlBefore);
+}
+
+/**
+ * Compare full document identities so navigation (new id, same version) is
+ * still a change. Missing instrumentation on either side is explicitly
+ * unknown rather than a false "unchanged" result.
  */
 async function documentChangeFields(
   cdp: CdpRunner,
   tabId: number,
-  versionBefore: number | undefined,
-): Promise<{ document_changed: boolean; document_version?: number }> {
-  const versionAfter = await readDocVersion(cdp, tabId);
-  if (versionAfter === undefined) {
-    // Cannot determine — omit fields (backward compat).
-    return { document_changed: false };
+  identityBefore: DocumentIdentity | null,
+  tabsApi: ChromeTabsApi,
+  navigationOccurred?: () => boolean,
+  urlBefore?: string,
+  awaitNavigation = false,
+  navigationExpected = false,
+): Promise<{
+  document_changed: boolean;
+  document_change_known: boolean;
+  document_version?: number;
+  identity_after: DocumentIdentity | null;
+  navigation_detected?: boolean;
+}> {
+  if (navigationOccurred?.()) {
+    return {
+      document_changed: true,
+      document_change_known: true,
+      identity_after: null,
+      navigation_detected: true,
+    };
   }
-  const changed = versionBefore !== undefined && versionAfter !== versionBefore;
-  return { document_changed: changed, document_version: versionAfter };
+  if (navigationExpected) {
+    const navigated = await waitForNavigationFallback(
+      tabsApi,
+      tabId,
+      urlBefore,
+      navigationOccurred,
+    );
+    return navigated
+      ? {
+          document_changed: true,
+          document_change_known: true,
+          identity_after: null,
+          navigation_detected: true,
+        }
+      : {
+          document_changed: false,
+          document_change_known: false,
+          identity_after: null,
+        };
+  }
+  let identityAfter = await readPostActionDocumentIdentity(cdp, tabId);
+  if (navigationOccurred?.()) {
+    return {
+      document_changed: true,
+      document_change_known: true,
+      identity_after: identityAfter,
+      navigation_detected: true,
+    };
+  }
+  if (!identityBefore || !identityAfter) {
+    const navigated = await waitForNavigationFallback(
+      tabsApi,
+      tabId,
+      identityBefore?.url ?? urlBefore,
+      navigationOccurred,
+    );
+    if (navigated) {
+      return {
+        document_changed: true,
+        document_change_known: true,
+        identity_after: null,
+        navigation_detected: true,
+      };
+    }
+    if (navigationExpected) {
+      return {
+        document_changed: true,
+        document_change_known: true,
+        identity_after: null,
+        navigation_detected: true,
+      };
+    }
+    return {
+      document_changed: false,
+      document_change_known: false,
+      document_version: identityAfter?.version,
+      identity_after: identityAfter,
+    };
+  }
+  if (!sameDocument(identityBefore, identityAfter)) {
+    return {
+      document_changed: true,
+      document_change_known: true,
+      document_version: identityAfter.version,
+      identity_after: identityAfter,
+    };
+  }
+
+  await settleDocumentChangeTurn(cdp, tabId);
+  identityAfter = await readPostActionDocumentIdentity(cdp, tabId);
+  if (navigationOccurred?.()) {
+    return {
+      document_changed: true,
+      document_change_known: true,
+      document_version: identityAfter?.version,
+      identity_after: identityAfter,
+      navigation_detected: true,
+    };
+  }
+  if (!identityAfter) {
+    return {
+      document_changed: false,
+      document_change_known: false,
+      identity_after: null,
+    };
+  }
+  if (
+    awaitNavigation &&
+    (await waitForNavigationFallback(
+      tabsApi,
+      tabId,
+      identityBefore.url ?? urlBefore,
+      navigationOccurred,
+    ))
+  ) {
+    return {
+      document_changed: true,
+      document_change_known: true,
+      identity_after: identityAfter,
+      navigation_detected: true,
+    };
+  }
+  return {
+    document_changed: !sameDocument(identityBefore, identityAfter),
+    document_change_known: true,
+    document_version: identityAfter.version,
+    identity_after: identityAfter,
+  };
+}
+
+type PageUpdateFields = {
+  document_changed: boolean;
+  document_change_known: boolean;
+  document_version?: number;
+  snapshot_delta?: InteractionSnapshotDelta;
+};
+
+async function pageUpdateFields(
+  cdp: CdpRunner,
+  ctx: SessionContext,
+  tabId: number,
+  identityBefore: DocumentIdentity | null,
+  mode: PageUpdateMode | undefined,
+  tabsApi: ChromeTabsApi,
+  navigationOccurred?: () => boolean,
+  urlBefore?: string,
+  awaitNavigation = false,
+  navigationExpected = false,
+): Promise<PageUpdateFields> {
+  if (mode === "none") {
+    return { document_changed: false, document_change_known: false };
+  }
+
+  // Chrome may resolve Input.dispatchMouseEvent before it runs a link's
+  // default navigation task. Yield the extension turn before probing the old
+  // Runtime context so our own CDP reads do not continuously win that race.
+  if (awaitNavigation) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+
+  const observation = await documentChangeFields(
+    cdp,
+    tabId,
+    identityBefore,
+    tabsApi,
+    navigationOccurred,
+    urlBefore,
+    awaitNavigation,
+    navigationExpected,
+  );
+  const {
+    identity_after: identityAfter,
+    navigation_detected: navigationDetected,
+    ...fields
+  } = observation;
+  if (mode !== "delta") return fields;
+
+  if (navigationDetected) {
+    return {
+      ...fields,
+      snapshot_delta: {
+        status: "full_required",
+        reason: "document navigation invalidated the previous Snapshot baseline",
+      },
+    };
+  }
+
+  if (!fields.document_change_known || !identityBefore || !identityAfter) {
+    return {
+      ...fields,
+      snapshot_delta: {
+        status: "delta_unavailable",
+        reason: "document identity unavailable before or after the action",
+      },
+    };
+  }
+  if (!fields.document_changed) {
+    return {
+      ...fields,
+      snapshot_delta: {
+        status: "unchanged",
+        base_document_version: identityBefore.version,
+        document_version: identityAfter.version,
+        removed_refs: [],
+      },
+    };
+  }
+  if (identityBefore.id !== identityAfter.id) {
+    return {
+      ...fields,
+      snapshot_delta: {
+        status: "full_required",
+        document_version: identityAfter.version,
+        reason: "document navigation invalidated the previous Snapshot baseline",
+      },
+    };
+  }
+  if (!hasSessionSnapshotBaseline(ctx, tabId, identityBefore)) {
+    return {
+      ...fields,
+      snapshot_delta: {
+        status: "full_required",
+        document_version: identityAfter.version,
+        reason: "no compatible Snapshot baseline exists for the pre-action document",
+      },
+    };
+  }
+
+  const snapshot = await captureSessionSnapshot(cdp, ctx, tabId, { incremental: true });
+  if (isRpcError(snapshot)) {
+    return {
+      ...fields,
+      snapshot_delta: {
+        status: "delta_unavailable",
+        document_version: identityAfter.version,
+        reason: snapshot.message,
+      },
+    };
+  }
+  if (snapshot.snapshot_kind !== "incremental") {
+    return {
+      ...fields,
+      snapshot_delta: {
+        status: "full_required",
+        document_version: snapshot.document_version ?? identityAfter.version,
+        reason: "an incremental Snapshot was not safe or materially smaller than a full Snapshot",
+      },
+    };
+  }
+  return {
+    ...fields,
+    snapshot_delta: {
+      status: "available",
+      text: snapshot.text,
+      base_document_version: snapshot.base_document_version,
+      document_version: snapshot.document_version,
+      removed_refs: snapshot.removed_refs ?? [],
+      ref_count: snapshot.ref_count,
+      truncated: snapshot.truncated,
+    },
+  };
 }
 
 let defaultDeps: { cdp: ChromiumCdp; tabsApi: ChromeTabsApi } | null = null;
@@ -162,6 +516,16 @@ export async function handleClick(
     signal: deps.signal,
   });
   if (isRpcError(node)) return node;
+  const identityBefore =
+    params.page_update === "none" ? null : await readDocumentIdentity(deps.cdp, target.tabId);
+  const urlBefore =
+    params.page_update === "none"
+      ? undefined
+      : (identityBefore?.url ?? (await readTabUrl(deps.tabsApi, target.tabId)));
+  const awaitNavigation = params.target?.role?.toLowerCase() === "link";
+  const navigationExpected = awaitNavigation
+    ? await linkSchedulesCurrentTabNavigation(deps.cdp, target.tabId, node.backendNodeId, urlBefore)
+    : false;
 
   if (throwIfAborted(deps.signal)) {
     return { code: "cancelled", message: "click aborted" };
@@ -188,9 +552,6 @@ export async function handleClick(
   const button: MouseButton = params.button ?? "left";
   const modifiers = modifiersBitfield(params.modifiers);
 
-  // Capture document version before the interaction.
-  const versionBefore = await readDocVersion(deps.cdp, target.tabId);
-
   const overlayBlocking = await checkOverlayAtPoint(deps.cdp, target.tabId, centre.x, centre.y);
   let automationBypassEnabled = false;
   if (overlayBlocking && deps.bypassOverlay) {
@@ -201,6 +562,22 @@ export async function handleClick(
       console.debug("[tabstride interaction] overlay bypass enable failed", err);
     }
   }
+  let navigationOccurred = false;
+  const navigationSubscription =
+    params.page_update === "none"
+      ? undefined
+      : deps.cdp.onEvent?.((source, method, eventParams) => {
+          if (source.tabId !== target.tabId) return;
+          if (method === "Page.frameNavigated") {
+            const frame = (eventParams as { frame?: { parentId?: string } })?.frame;
+            if (!frame?.parentId) navigationOccurred = true;
+            return;
+          }
+          if (method === "Page.frameRequestedNavigation") {
+            const requested = eventParams as { disposition?: string };
+            if (requested.disposition === "currentTab") navigationOccurred = true;
+          }
+        });
 
   try {
     // Move first so hover state activates, then press → release.
@@ -211,6 +588,7 @@ export async function handleClick(
       modifiers,
     });
     if (throwIfAborted(deps.signal)) {
+      navigationSubscription?.dispose();
       return { code: "cancelled", message: "click aborted" };
     }
     await deps.cdp.send(target.tabId, "Input.dispatchMouseEvent", {
@@ -234,17 +612,31 @@ export async function handleClick(
       } catch (err) {
         console.debug("[tabstride interaction] best-effort mouseReleased after abort failed", err);
       }
+      navigationSubscription?.dispose();
       return { code: "cancelled", message: "click aborted" };
     }
-    await deps.cdp.send(target.tabId, "Input.dispatchMouseEvent", {
-      type: "mouseReleased",
-      x: centre.x,
-      y: centre.y,
-      button,
-      clickCount,
-      modifiers,
-    });
+    const release = await Promise.race([
+      deps.cdp
+        .send(target.tabId, "Input.dispatchMouseEvent", {
+          type: "mouseReleased",
+          x: centre.x,
+          y: centre.y,
+          button,
+          clickCount,
+          modifiers,
+        })
+        .then(() => ({ status: "ok" as const }))
+        .catch((error: unknown) => ({ status: "error" as const, error })),
+      new Promise<{ status: "timeout" }>((resolve) =>
+        setTimeout(() => resolve({ status: "timeout" }), POST_ACTION_IDENTITY_PROBE_MS),
+      ),
+    ]);
+    if (release.status !== "ok" && !navigationOccurred) {
+      if (release.status === "error") throw release.error;
+      throw new Error("mouseReleased did not settle before the page-update deadline");
+    }
   } catch (err) {
+    navigationSubscription?.dispose();
     return {
       code: "cdp_failed",
       message: err instanceof Error ? err.message : String(err),
@@ -259,7 +651,23 @@ export async function handleClick(
     }
   }
 
-  const docChange = await documentChangeFields(deps.cdp, target.tabId, versionBefore);
+  let docChange: PageUpdateFields;
+  try {
+    docChange = await pageUpdateFields(
+      deps.cdp,
+      ctx,
+      target.tabId,
+      identityBefore,
+      params.page_update,
+      deps.tabsApi,
+      () => navigationOccurred,
+      urlBefore,
+      awaitNavigation,
+      navigationExpected,
+    );
+  } finally {
+    navigationSubscription?.dispose();
+  }
   return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
     tab_id: target.tabId,
     used_target: node.usedTarget,
@@ -432,6 +840,8 @@ export async function handleFill(
     signal: deps.signal,
   });
   if (isRpcError(node)) return node;
+  const identityBefore =
+    params.page_update === "none" ? null : await readDocumentIdentity(deps.cdp, target.tabId);
 
   try {
     deps.cdp.trackSessionTab?.(ctx.sessionId, target.tabId);
@@ -465,9 +875,6 @@ export async function handleFill(
   if (throwIfAborted(deps.signal)) {
     return { code: "cancelled", message: "fill aborted" };
   }
-
-  // Capture document version before the interaction.
-  const versionBefore = await readDocVersion(deps.cdp, target.tabId);
 
   const objectIdOrErr = await backendNodeToObject(deps.cdp, target.tabId, node.backendNodeId);
   if (isRpcError(objectIdOrErr)) return objectIdOrErr;
@@ -520,7 +927,14 @@ export async function handleFill(
     };
   }
 
-  const docChange = await documentChangeFields(deps.cdp, target.tabId, versionBefore);
+  const docChange = await pageUpdateFields(
+    deps.cdp,
+    ctx,
+    target.tabId,
+    identityBefore,
+    params.page_update,
+    deps.tabsApi,
+  );
   return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
     tab_id: target.tabId,
     used_target: node.usedTarget,
@@ -703,7 +1117,7 @@ export async function handlePress(
   }
 
   let usedTarget: PressResult["used_target"];
-  // Optional focus before key dispatch.
+  let focusBackendNodeId: number | undefined;
   if (params.target) {
     const node = await waitForActionable(deps.cdp, ctx, target.tabId, params.target, "press", {
       timeoutMs: params.timeout_ms ?? deps.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -711,14 +1125,24 @@ export async function handlePress(
     });
     if (isRpcError(node)) return node;
     usedTarget = node.usedTarget;
+    focusBackendNodeId = node.backendNodeId;
+  }
+
+  // Capture before focus/scroll as those operations may themselves trigger
+  // page mutations that belong to this action.
+  const identityBefore =
+    params.page_update === "none" ? null : await readDocumentIdentity(deps.cdp, target.tabId);
+
+  // Optional focus before key dispatch.
+  if (focusBackendNodeId !== undefined) {
     try {
       deps.cdp.trackSessionTab?.(ctx.sessionId, target.tabId);
-      const scrollErr = await scrollNodeIntoView(deps.cdp, target.tabId, node.backendNodeId);
+      const scrollErr = await scrollNodeIntoView(deps.cdp, target.tabId, focusBackendNodeId);
       if (scrollErr) return scrollErr;
       if (throwIfAborted(deps.signal)) {
         return { code: "cancelled", message: "press aborted" };
       }
-      await deps.cdp.send(target.tabId, "DOM.focus", { backendNodeId: node.backendNodeId });
+      await deps.cdp.send(target.tabId, "DOM.focus", { backendNodeId: focusBackendNodeId });
     } catch (err) {
       return {
         code: "cdp_failed",
@@ -730,9 +1154,6 @@ export async function handlePress(
   if (throwIfAborted(deps.signal)) {
     return { code: "cancelled", message: "press aborted" };
   }
-
-  // Capture document version before the interaction.
-  const versionBefore = await readDocVersion(deps.cdp, target.tabId);
 
   const modifiers = modifiersBitfield(mods);
   // Suppress `text` when any non-shift modifier is held — `Ctrl+a`
@@ -789,7 +1210,14 @@ export async function handlePress(
     };
   }
 
-  const docChange = await documentChangeFields(deps.cdp, target.tabId, versionBefore);
+  const docChange = await pageUpdateFields(
+    deps.cdp,
+    ctx,
+    target.tabId,
+    identityBefore,
+    params.page_update,
+    deps.tabsApi,
+  );
   return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
     tab_id: target.tabId,
     key: descriptor.key,
@@ -832,6 +1260,8 @@ export async function handleSelect(
     signal: deps.signal,
   });
   if (isRpcError(node)) return node;
+  const identityBefore =
+    params.page_update === "none" ? null : await readDocumentIdentity(deps.cdp, target.tabId);
 
   try {
     deps.cdp.trackSessionTab?.(ctx.sessionId, target.tabId);
@@ -874,9 +1304,6 @@ export async function handleSelect(
   if (throwIfAborted(deps.signal)) {
     return { code: "cancelled", message: "select aborted" };
   }
-
-  // Capture document version before the interaction.
-  const versionBefore = await readDocVersion(deps.cdp, target.tabId);
 
   const objectIdOrErr = await backendNodeToObject(deps.cdp, target.tabId, node.backendNodeId);
   if (isRpcError(objectIdOrErr)) return objectIdOrErr;
@@ -924,7 +1351,14 @@ export async function handleSelect(
       }
       return { code: "cdp_failed", message: "select mutation returned an unexpected result" };
     }
-    const docChange = await documentChangeFields(deps.cdp, target.tabId, versionBefore);
+    const docChange = await pageUpdateFields(
+      deps.cdp,
+      ctx,
+      target.tabId,
+      identityBefore,
+      params.page_update,
+      deps.tabsApi,
+    );
     return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
       tab_id: target.tabId,
       used_target: node.usedTarget,

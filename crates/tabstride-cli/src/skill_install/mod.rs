@@ -294,6 +294,8 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    const ROOT_SKILL_MD: &str = include_str!("../../../../skill/SKILL.md");
+
     #[test]
     fn bundled_skill_forbids_normal_path_diagnostic_preflights() {
         assert!(DEFAULT_SKILL_MD.contains("## Fast path: no diagnostic preflight"));
@@ -305,6 +307,29 @@ mod tests {
             DEFAULT_SKILL_MD
                 .contains("Do not call `tabstride browsers` to retrieve the same list again.")
         );
+    }
+
+    #[test]
+    fn bundled_skill_documents_page_update_strategy() {
+        assert!(DEFAULT_SKILL_MD.contains("--page-update none|signal|delta"));
+        assert!(DEFAULT_SKILL_MD.contains("Set `page_update: none`"));
+        assert!(DEFAULT_SKILL_MD.contains("Use `delta` only after a Snapshot"));
+        assert!(DEFAULT_SKILL_MD.contains("Never request Delta on every"));
+        assert!(DEFAULT_SKILL_MD.contains("`full_required`, `delta_unavailable`"));
+    }
+
+    #[test]
+    fn bundled_skill_matches_execution_path_contract() {
+        assert_eq!(DEFAULT_SKILL_MD, ROOT_SKILL_MD);
+        assert!(DEFAULT_SKILL_MD.contains("one Agent/CLI request to the daemon"));
+        assert!(DEFAULT_SKILL_MD.contains("one extension request per Step"));
+        assert!(DEFAULT_SKILL_MD.contains("same persistent client"));
+        assert!(DEFAULT_SKILL_MD.contains("document_change_known=false"));
+        assert!(DEFAULT_SKILL_MD.contains("full_required` or `delta_unavailable"));
+        assert!(DEFAULT_SKILL_MD.contains("On `user_aborted`, send no more browser requests"));
+        assert!(DEFAULT_SKILL_MD.contains("global `--json` flag"));
+        assert!(!DEFAULT_SKILL_MD.contains("--format json"));
+        assert!(!DEFAULT_SKILL_MD.contains("Before first task in a session"));
     }
 
     #[test]

@@ -653,6 +653,9 @@ async fn session_window_closed_event_purges_session() {
         initial_snapshot_text: None,
         initial_snapshot_ref_count: 0,
         initial_snapshot_truncated: false,
+        initial_snapshot_available: None,
+        initial_snapshot_error: None,
+        initial_timing: None,
     };
     state.sessions.insert(session);
     assert_eq!(state.sessions.len(), 1);
@@ -698,6 +701,9 @@ async fn browser_disconnect_purges_sessions() {
         initial_snapshot_text: None,
         initial_snapshot_ref_count: 0,
         initial_snapshot_truncated: false,
+        initial_snapshot_available: None,
+        initial_snapshot_error: None,
+        initial_timing: None,
     };
     state.sessions.insert(session);
     assert_eq!(state.sessions.len(), 1);
@@ -736,6 +742,9 @@ async fn session_stop_self_heals_when_extension_reports_not_found() {
         initial_snapshot_text: None,
         initial_snapshot_ref_count: 0,
         initial_snapshot_truncated: false,
+        initial_snapshot_available: None,
+        initial_snapshot_error: None,
+        initial_timing: None,
     };
     state.sessions.insert(session);
     state
@@ -844,6 +853,9 @@ async fn reconnect_with_same_instance_id_does_not_clobber_new_browser() {
         initial_snapshot_text: None,
         initial_snapshot_ref_count: 0,
         initial_snapshot_truncated: false,
+        initial_snapshot_available: None,
+        initial_snapshot_error: None,
+        initial_timing: None,
     };
     state.sessions.insert(session);
     assert_eq!(state.sessions.len(), 1);
@@ -965,6 +977,8 @@ async fn session_start_with_snapshot_returns_initial_page_state() {
                                 ),
                                 snapshot_ref_count: 2,
                                 snapshot_truncated: false,
+                                snapshot_available: Some(true),
+                                snapshot_error: None,
                             }
                         } else {
                             SessionStartResult {
@@ -1010,6 +1024,9 @@ async fn session_start_with_snapshot_returns_initial_page_state() {
         snapshot_text: Option<String>,
         snapshot_ref_count: u32,
         snapshot_truncated: bool,
+        snapshot_requested: Option<bool>,
+        snapshot_available: Option<bool>,
+        snapshot_error: Option<tabstride_protocol::RpcError>,
     }
 
     // 1. Attach with snapshot → response includes page metadata + snapshot.
@@ -1041,6 +1058,9 @@ async fn session_start_with_snapshot_returns_initial_page_state() {
     );
     assert_eq!(start.snapshot_ref_count, 2);
     assert!(!start.snapshot_truncated);
+    assert_eq!(start.snapshot_requested, Some(true));
+    assert_eq!(start.snapshot_available, Some(true));
+    assert_eq!(start.snapshot_error, None);
 
     // Clean up.
     #[derive(serde::Serialize)]

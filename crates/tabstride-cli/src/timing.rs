@@ -37,6 +37,17 @@ pub struct TimingTrace {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_step_index: Option<usize>,
+    /// Daemon-local work for a Flow step that never uses WebSocket/CDP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_us: Option<u64>,
+    /// Internal test/persistent-client control: collect the trace but do not
+    /// append it to the process-wide metrics file.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub skip_metric: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_received_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serve_queue_entered_at: Option<u64>,
@@ -52,6 +63,18 @@ pub struct TimingTrace {
     pub cdp_finished_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extension_replied_at: Option<u64>,
+    /// Epoch timestamp immediately before the extension enqueues its response
+    /// on the WebSocket transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_response_sent_at: Option<u64>,
+    /// Epoch timestamp recorded by the daemon as soon as the extension
+    /// response is decoded from the WebSocket.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serve_extension_received_at: Option<u64>,
+    /// Sum of the elapsed time of every individual CDP command. New peers
+    /// populate this directly; old peers only provide the CDP span below.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cdp_us: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serve_replied_at: Option<u64>,
     #[serde(default, skip_serializing_if = "RuntimeCounters::is_empty")]
@@ -63,6 +86,10 @@ pub struct MetricRecord {
     pub recorded_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_index: Option<usize>,
     pub method: String,
     pub outcome: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -80,6 +107,10 @@ fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 impl TimingTrace {
     pub fn duration_us(
         &self,
@@ -94,8 +125,24 @@ impl TimingTrace {
             .checked_sub(self.serve_queue_entered_at?)
     }
 
+    /// WebSocket transport only: daemon → extension plus extension → daemon.
+    /// Extension execution between receive and reply is deliberately excluded.
     pub fn websocket_us(&self) -> Option<u64> {
-        self.extension_received_at?
+        // Absolute daemon and extension timestamps are produced by different
+        // clocks and can differ by sub-millisecond offsets. Subtract two local
+        // durations instead: daemon-observed roundtrip minus extension receive
+        // through response enqueue. This yields both transport legs without a
+        // cross-clock subtraction.
+        let extension_span = self
+            .extension_response_sent_at?
+            .checked_sub(self.extension_received_at?)?;
+        self.websocket_roundtrip_us()?.checked_sub(extension_span)
+    }
+
+    /// Wall-clock request/response span observed by the daemon. This includes
+    /// extension processing and is therefore distinct from `websocket_us`.
+    pub fn websocket_roundtrip_us(&self) -> Option<u64> {
+        self.serve_extension_received_at?
             .checked_sub(self.extension_sent_at?)
     }
 
@@ -104,7 +151,33 @@ impl TimingTrace {
             .checked_sub(self.extension_received_at?)
     }
 
+    pub fn extension_non_cdp_us(&self) -> Option<u64> {
+        let cdp_us = match self.cdp_us {
+            Some(value) => value,
+            None if self.counters.cdp_calls == 0
+                && self.cdp_started_at.is_none()
+                && self.cdp_finished_at.is_none() =>
+            {
+                0
+            }
+            None => return None,
+        };
+        // Evidence collection can issue independent CDP commands concurrently.
+        // Their call-by-call durations then legitimately sum to more than the
+        // extension wall time; keep the phase available as a zero lower bound
+        // instead of dropping it from failed/timeout step Timing.
+        Some(self.extension_dispatch_us()?.saturating_sub(cdp_us))
+    }
+
+    /// Sum of individual CDP command durations. Fall back to the legacy span
+    /// when reading metrics emitted by an older extension.
     pub fn cdp_us(&self) -> Option<u64> {
+        self.cdp_us.or_else(|| self.cdp_span_us())
+    }
+
+    /// First CDP command start → last CDP command finish. This can include
+    /// locator waits and other work between commands and is diagnostic only.
+    pub fn cdp_span_us(&self) -> Option<u64> {
         self.cdp_finished_at?.checked_sub(self.cdp_started_at?)
     }
 
@@ -198,17 +271,24 @@ mod tests {
             cdp_started_at: Some(170),
             cdp_finished_at: Some(210),
             extension_replied_at: Some(220),
+            extension_response_sent_at: Some(225),
+            serve_extension_received_at: Some(230),
+            cdp_us: Some(25),
             serve_replied_at: Some(250),
             counters: RuntimeCounters {
                 cdp_calls: 3,
                 full_ax_tree_calls: 1,
                 ..RuntimeCounters::default()
             },
+            ..TimingTrace::default()
         };
         assert_eq!(trace.queue_wait_us(), Some(20));
-        assert_eq!(trace.websocket_us(), Some(20));
+        assert_eq!(trace.websocket_us(), Some(25));
+        assert_eq!(trace.websocket_roundtrip_us(), Some(90));
         assert_eq!(trace.extension_dispatch_us(), Some(60));
-        assert_eq!(trace.cdp_us(), Some(40));
+        assert_eq!(trace.extension_non_cdp_us(), Some(35));
+        assert_eq!(trace.cdp_us(), Some(25));
+        assert_eq!(trace.cdp_span_us(), Some(40));
         assert_eq!(trace.total_runtime_us(), Some(150));
         assert_eq!(trace.run_id.as_deref(), Some("run-test"));
         assert_eq!(trace.counters.full_ax_tree_calls, 1);
@@ -237,5 +317,59 @@ mod tests {
         .unwrap();
         assert_eq!(record.run_id, None);
         assert!(record.timing.counters.is_empty());
+    }
+
+    #[test]
+    fn legacy_cdp_span_remains_readable() {
+        let trace: TimingTrace = serde_json::from_value(serde_json::json!({
+            "cdp_started_at": 100,
+            "cdp_finished_at": 140
+        }))
+        .unwrap();
+        assert_eq!(trace.cdp_us(), Some(40));
+        assert_eq!(trace.cdp_span_us(), Some(40));
+        assert_eq!(trace.extension_non_cdp_us(), None);
+    }
+
+    #[test]
+    fn overlapping_cdp_calls_keep_non_cdp_phase_available() {
+        let trace = TimingTrace {
+            extension_received_at: Some(100),
+            extension_replied_at: Some(180),
+            cdp_us: Some(90),
+            ..TimingTrace::default()
+        };
+        assert_eq!(trace.extension_non_cdp_us(), Some(0));
+    }
+
+    #[test]
+    fn missing_or_backwards_timestamps_degrade_to_unavailable() {
+        let trace = TimingTrace {
+            extension_sent_at: Some(200),
+            extension_received_at: Some(190),
+            extension_replied_at: Some(300),
+            extension_response_sent_at: Some(300),
+            serve_extension_received_at: Some(290),
+            cdp_started_at: Some(500),
+            cdp_finished_at: Some(400),
+            ..TimingTrace::default()
+        };
+        assert_eq!(trace.websocket_us(), None);
+        assert_eq!(trace.websocket_roundtrip_us(), Some(90));
+        assert_eq!(trace.cdp_us(), None);
+        assert_eq!(trace.cdp_span_us(), None);
+    }
+
+    #[test]
+    fn websocket_duration_does_not_require_cross_clock_alignment() {
+        let trace = TimingTrace {
+            extension_sent_at: Some(1_000),
+            extension_received_at: Some(900),
+            extension_response_sent_at: Some(1_000),
+            serve_extension_received_at: Some(1_200),
+            ..TimingTrace::default()
+        };
+        assert_eq!(trace.websocket_roundtrip_us(), Some(200));
+        assert_eq!(trace.websocket_us(), Some(100));
     }
 }

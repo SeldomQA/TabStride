@@ -28,6 +28,8 @@ use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode};
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, Message};
 use tracing::{debug, info, warn};
 
+use crate::timing::{TIMING_FIELD, epoch_us, put_trace, trace_from};
+
 use super::browsers::{BrowserClient, BrowserId, BrowserSink, Pending};
 use super::state::{
     DaemonState, LEGACY_MIN_COMPATIBLE_PEER, MIN_COMPATIBLE_PROTOCOL, PROTOCOL_VERSION, SERVER_NAME,
@@ -438,7 +440,8 @@ async fn handle_inbound_text(state: &Arc<DaemonState>, client: &Arc<BrowserClien
         }
     };
     match frame {
-        Frame::Response(resp) => {
+        Frame::Response(mut resp) => {
+            stamp_extension_response_received(&mut resp);
             let mut pending = client.pending.lock().unwrap();
             if !pending.resolve(resp.clone()) {
                 debug!(id = %resp.id, "response for unknown rpc id (ignored)");
@@ -460,6 +463,24 @@ async fn handle_inbound_text(state: &Arc<DaemonState>, client: &Arc<BrowserClien
             debug!(method = ?req.method, "extension request not yet handled");
         }
     }
+}
+
+fn stamp_extension_response_received(response: &mut ResponseFrame) {
+    let value = match &mut response.body {
+        ResponseBody::Ok(value) => value,
+        ResponseBody::Err(error) => {
+            let Some(data) = error.data.as_mut() else {
+                return;
+            };
+            data
+        }
+    };
+    if value.get(TIMING_FIELD).is_none() {
+        return;
+    }
+    let mut trace = trace_from(value);
+    trace.serve_extension_received_at = Some(epoch_us());
+    put_trace(value, &trace);
 }
 
 fn handle_session_window_closed(
@@ -611,6 +632,32 @@ mod tests {
     #[test]
     fn origin_allowlist_bypassed_when_allow_any() {
         assert!(origin_allowed("http://localhost", true));
+    }
+
+    #[test]
+    fn stamps_daemon_receive_time_inside_hidden_timing_metadata() {
+        let before = epoch_us();
+        let mut response = ResponseFrame {
+            id: "rpc-1".into(),
+            body: ResponseBody::Ok(serde_json::json!({
+                "tab_id": 7,
+                "__tabstride_timing": {
+                    "extension_sent_at": 10,
+                    "extension_replied_at": 20
+                }
+            })),
+        };
+        stamp_extension_response_received(&mut response);
+        let after = epoch_us();
+
+        let ResponseBody::Ok(mut output) = response.body else {
+            panic!("expected success response");
+        };
+        let trace = crate::timing::take_trace(&mut output).expect("timing trace");
+        assert!(
+            (before..=after).contains(&trace.serve_extension_received_at.expect("receive time"))
+        );
+        assert_eq!(output, serde_json::json!({"tab_id": 7}));
     }
 }
 

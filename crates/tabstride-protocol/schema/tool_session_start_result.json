@@ -26,6 +26,24 @@
       "format": "uint64",
       "minimum": 0.0
     },
+    "snapshot_available": {
+      "description": "Explicit availability from extensions that implement merged Snapshot status. `None` keeps older extension payloads wire-compatible.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "snapshot_error": {
+      "description": "Structured reason why the requested Snapshot could not be captured.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RpcError"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "snapshot_ref_count": {
       "description": "Number of `@e<N>` refs registered for this session by the initial snapshot.",
       "default": 0,
@@ -58,6 +76,45 @@
         "string",
         "null"
       ]
+    }
+  },
+  "definitions": {
+    "ErrorCode": {
+      "description": "Stable daemon/extension error codes (§4.5).",
+      "type": "string",
+      "enum": [
+        "unknown_method",
+        "unsupported",
+        "invalid_params",
+        "not_found",
+        "ambiguous_target",
+        "permission_denied",
+        "timeout",
+        "cdp_failed",
+        "protocol_error",
+        "cancelled",
+        "user_aborted",
+        "version_too_old",
+        "multiple_browsers_online",
+        "no_browser_connected"
+      ]
+    },
+    "RpcError": {
+      "description": "Wire-format JSON-RPC error object carried inside [`crate::frame::ResponseFrame`].",
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/ErrorCode"
+        },
+        "data": true,
+        "message": {
+          "type": "string"
+        }
+      }
     }
   }
 }

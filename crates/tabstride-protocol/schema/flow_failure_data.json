@@ -1,13 +1,19 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "FlowRunResult",
+  "title": "FlowFailureData",
   "type": "object",
   "required": [
+    "cause",
     "completed_steps",
     "duration_ms",
-    "name"
+    "failed_method",
+    "failed_step",
+    "flow_name"
   ],
   "properties": {
+    "cause": {
+      "$ref": "#/definitions/RpcError"
+    },
     "completed_steps": {
       "type": "array",
       "items": {
@@ -19,11 +25,50 @@
       "format": "uint64",
       "minimum": 0.0
     },
-    "name": {
+    "failed_method": {
+      "type": "string"
+    },
+    "failed_step": {
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0.0
+    },
+    "failed_step_result": {
+      "description": "Result metadata for the step that failed after execution started. Validation failures or cancellation before dispatch leave this absent.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FlowStepResult"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "flow_name": {
       "type": "string"
     }
   },
   "definitions": {
+    "ErrorCode": {
+      "description": "Stable daemon/extension error codes (§4.5).",
+      "type": "string",
+      "enum": [
+        "unknown_method",
+        "unsupported",
+        "invalid_params",
+        "not_found",
+        "ambiguous_target",
+        "permission_denied",
+        "timeout",
+        "cdp_failed",
+        "protocol_error",
+        "cancelled",
+        "user_aborted",
+        "version_too_old",
+        "multiple_browsers_online",
+        "no_browser_connected"
+      ]
+    },
     "FlowStepResult": {
       "type": "object",
       "required": [
@@ -57,6 +102,23 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "RpcError": {
+      "description": "Wire-format JSON-RPC error object carried inside [`crate::frame::ResponseFrame`].",
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/ErrorCode"
+        },
+        "data": true,
+        "message": {
+          "type": "string"
         }
       }
     },

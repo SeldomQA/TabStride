@@ -7,7 +7,7 @@ import type {
   ProtocolFrame,
   RequestFrame,
 } from "@/transport/types";
-import { ToolDispatcher } from "../dispatcher";
+import { ToolDispatcher, timedCdp } from "../dispatcher";
 import type { CdpRunner } from "../shared";
 
 const TINY_PNG =
@@ -47,6 +47,27 @@ function makeRequest(method: string, params: unknown): RequestFrame {
 describe("ToolDispatcher", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("sums individual CDP calls without charging the gap between them", async () => {
+    const send = vi.fn(async () => ({}));
+    const cdp = { send } as unknown as CdpRunner;
+    const timing: import("@/transport/types").TimingTrace = {};
+    const epochValues = [100, 110, 10_000, 10_030];
+    const monotonicValues = [0, 10, 1_000, 1_030];
+    const wrapped = timedCdp(cdp, timing, {
+      epochUs: () => epochValues.shift()!,
+      monotonicUs: () => monotonicValues.shift()!,
+    });
+
+    await wrapped.send(1, "Runtime.evaluate", {});
+    await wrapped.send(1, "DOM.getDocument", {});
+
+    expect(timing.counters?.cdp_calls).toBe(2);
+    expect(timing.cdp_us).toBe(40);
+    expect(timing.cdp_started_at).toBe(100);
+    expect(timing.cdp_finished_at).toBe(10_030);
+    expect(timing.cdp_finished_at! - timing.cdp_started_at!).toBe(9_930);
   });
 
   it("routes tool.session_start to the SessionManager and replies with the window id", async () => {

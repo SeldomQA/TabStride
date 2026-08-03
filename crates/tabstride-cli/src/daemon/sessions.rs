@@ -17,6 +17,8 @@ use tabstride_protocol::tools::{
 use tabstride_protocol::{Frame, RequestFrame, ResponseBody, RpcError, RpcId};
 use tokio::time::{Duration, timeout};
 
+use crate::timing::{TimingTrace, epoch_us, take_trace};
+
 use super::browsers::{BrowserClient, BrowserId, BrowserRegistry, SelectError};
 use super::queue::{DispatchError, ToolQueueRegistry};
 use super::session_interrupt::SessionInterruptRegistry;
@@ -60,6 +62,10 @@ pub struct Session {
     pub initial_snapshot_text: Option<String>,
     pub initial_snapshot_ref_count: u32,
     pub initial_snapshot_truncated: bool,
+    pub initial_snapshot_available: Option<bool>,
+    pub initial_snapshot_error: Option<RpcError>,
+    /// Timing returned by the extension for merged initial Snapshot work.
+    pub initial_timing: Option<TimingTrace>,
 }
 
 impl Session {
@@ -160,6 +166,9 @@ impl SessionRegistry {
                     initial_snapshot_text: None,
                     initial_snapshot_ref_count: 0,
                     initial_snapshot_truncated: false,
+                    initial_snapshot_available: None,
+                    initial_snapshot_error: None,
+                    initial_timing: None,
                 },
             );
             return Some(candidate);
@@ -185,6 +194,9 @@ impl SessionRegistry {
         session.initial_snapshot_text = data.initial_snapshot_text;
         session.initial_snapshot_ref_count = data.initial_snapshot_ref_count;
         session.initial_snapshot_truncated = data.initial_snapshot_truncated;
+        session.initial_snapshot_available = data.initial_snapshot_available;
+        session.initial_snapshot_error = data.initial_snapshot_error;
+        session.initial_timing = data.initial_timing;
         Some(session.clone())
     }
 
@@ -354,7 +366,7 @@ pub enum StopSessionError {
 /// of live sessions.
 const SESSION_ID_MAX_RESERVE_ATTEMPTS: u32 = 64;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct StartSessionRequest<'a> {
     pub requested_browser: Option<&'a str>,
     pub mode: SessionMode,
@@ -363,6 +375,9 @@ pub struct StartSessionRequest<'a> {
     /// Request an initial accessibility snapshot alongside session
     /// creation (A-2: merged attach+snapshot).
     pub snapshot: bool,
+    /// Optional end-to-end trace forwarded to the extension. This makes
+    /// merged Snapshot CDP/AX work visible in task Metrics.
+    pub timing: Option<TimingTrace>,
     pub connect_wait: Duration,
     pub timeout: Duration,
 }
@@ -379,11 +394,15 @@ pub struct CommittedSessionData {
     initial_snapshot_text: Option<String>,
     initial_snapshot_ref_count: u32,
     initial_snapshot_truncated: bool,
+    initial_snapshot_available: Option<bool>,
+    initial_snapshot_error: Option<RpcError>,
+    initial_timing: Option<TimingTrace>,
 }
 
 fn validate_start_result(
     mode: SessionMode,
     result: SessionStartResult,
+    timing: Option<TimingTrace>,
 ) -> Result<CommittedSessionData, RpcError> {
     let valid = match mode {
         SessionMode::Isolated => {
@@ -407,6 +426,9 @@ fn validate_start_result(
         initial_snapshot_text: result.snapshot_text,
         initial_snapshot_ref_count: result.snapshot_ref_count,
         initial_snapshot_truncated: result.snapshot_truncated,
+        initial_snapshot_available: result.snapshot_available,
+        initial_snapshot_error: result.snapshot_error,
+        initial_timing: timing,
     })
 }
 
@@ -486,11 +508,15 @@ pub async fn start_session(
         snapshot: request.snapshot,
     };
     let rpc_id = next_rpc_id("sess-start");
+    let mut timing = request.timing;
+    if let Some(timing) = timing.as_mut() {
+        timing.extension_sent_at = Some(epoch_us());
+    }
     let frame = RequestFrame {
         id: rpc_id.clone(),
         method: tabstride_protocol::Method::ToolSessionStart,
         params: Some(serde_json::to_value(&params).unwrap()),
-        timing: None,
+        timing: timing.map(|timing| serde_json::to_value(timing).unwrap()),
     };
     let waiter = {
         let mut pending = client.pending.lock().unwrap();
@@ -515,24 +541,27 @@ pub async fn start_session(
         }
     };
     let committed = match response.body {
-        ResponseBody::Ok(v) => match serde_json::from_value::<SessionStartResult>(v) {
-            Ok(parsed) => match validate_start_result(request.mode, parsed) {
-                Ok(target) => target,
-                Err(err) => {
-                    rollback_extension_session(&client, &session_id, request.timeout).await;
+        ResponseBody::Ok(mut v) => {
+            let timing = take_trace(&mut v);
+            match serde_json::from_value::<SessionStartResult>(v) {
+                Ok(parsed) => match validate_start_result(request.mode, parsed, timing) {
+                    Ok(target) => target,
+                    Err(err) => {
+                        rollback_extension_session(&client, &session_id, request.timeout).await;
+                        sessions.cancel_reservation(&session_id);
+                        return Err(StartSessionError::ExtensionError(err));
+                    }
+                },
+                Err(_) => {
                     sessions.cancel_reservation(&session_id);
-                    return Err(StartSessionError::ExtensionError(err));
+                    return Err(StartSessionError::ExtensionError(RpcError {
+                        code: tabstride_protocol::ErrorCode::ProtocolError,
+                        message: "invalid tool.session_start payload".into(),
+                        data: None,
+                    }));
                 }
-            },
-            Err(_) => {
-                sessions.cancel_reservation(&session_id);
-                return Err(StartSessionError::ExtensionError(RpcError {
-                    code: tabstride_protocol::ErrorCode::ProtocolError,
-                    message: "invalid tool.session_start payload".into(),
-                    data: None,
-                }));
             }
-        },
+        }
         ResponseBody::Err(err) => {
             sessions.cancel_reservation(&session_id);
             return Err(StartSessionError::ExtensionError(err));

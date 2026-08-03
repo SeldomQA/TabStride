@@ -5,7 +5,11 @@
 
 import { ChromiumCdp } from "@/browser-driver/chromium-cdp";
 import { TABSTRIDE_OVERLAY_HOST_SELECTOR } from "@/lib/overlay-dom";
-import { readDocumentIdentity, sameDocument } from "@/session-manager/document-cache";
+import {
+  type DocumentIdentity,
+  readDocumentIdentity,
+  sameDocument,
+} from "@/session-manager/document-cache";
 import type { SessionContext, SessionManager } from "@/session-manager/manager";
 import type {
   GetHtmlParams,
@@ -519,6 +523,11 @@ export interface SnapshotDeps {
   };
 }
 
+export type SessionSnapshotOptions = Pick<
+  SnapshotParams,
+  "incremental" | "max_depth" | "max_tokens"
+>;
+
 let defaultDeps: SnapshotDeps | null = null;
 function getDefaultDeps(): SnapshotDeps {
   if (!defaultDeps) {
@@ -635,66 +644,138 @@ export async function handleSnapshot(
   if (isRpcError(target)) return target;
   const dialogCursor = markDialogCursor(deps.cdp, target.tabId);
 
-  const document = await readDocumentIdentity(deps.cdp, target.tabId);
-  const cacheKey = `${target.tabId}:${params.max_depth ?? ""}:${params.max_tokens ?? ""}`;
+  const snapshot = await captureSessionSnapshot(deps.cdp, ctx, target.tabId, params);
+  if (isRpcError(snapshot)) return snapshot;
+  return attachDialogs(deps.cdp, target.tabId, dialogCursor, snapshot);
+}
+
+/**
+ * Shared Snapshot executor for callers that already resolved a SessionContext
+ * and target tab. Both `tool.snapshot` and merged `session.start --snapshot`
+ * use this path so refs, overlay filtering, document caching, and incremental
+ * results have identical semantics.
+ *
+ * A fresh capture is cached only when the document identity is unchanged
+ * before and after AX collection. If the page mutates during collection, the
+ * executor retries once against the new identity; a second race still returns
+ * the latest full Snapshot but deliberately avoids caching it as a delta base.
+ */
+export async function captureSessionSnapshot(
+  cdp: CdpRunner,
+  ctx: SessionContext,
+  tabId: number,
+  params: SessionSnapshotOptions = {},
+): Promise<SnapshotResult | RpcError> {
+  const cacheKey = sessionSnapshotCacheKey(tabId, params);
   const cached = ctx.documentCache.snapshots.get(cacheKey);
+  let document = await readDocumentIdentity(cdp, tabId);
+
   if (document && cached && sameDocument(cached.document, document)) {
-    incrementRuntimeCounter(deps.cdp, "snapshot_cache_hits");
+    incrementRuntimeCounter(cdp, "snapshot_cache_hits");
     const previous = cached.value as SnapshotResult;
-    return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
+    return {
       ...previous,
       text: params.incremental ? "" : previous.text,
       snapshot_kind: "cached",
       base_document_version: document.version,
       removed_refs: [],
-    });
+    };
   }
-  if (document) incrementRuntimeCounter(deps.cdp, "snapshot_cache_misses");
+  if (document) incrementRuntimeCounter(cdp, "snapshot_cache_misses");
 
-  let internalBackendNodeIds = document
-    ? ctx.documentCache.overlayBackendNodeIds.get(document.id)
-    : undefined;
-  if (document && internalBackendNodeIds) {
-    incrementRuntimeCounter(deps.cdp, "overlay_cache_hits");
-  }
-  if (document && !internalBackendNodeIds) {
-    incrementRuntimeCounter(deps.cdp, "overlay_cache_misses");
-    internalBackendNodeIds = await findInternalOverlayBackendNodeIds(deps.cdp, target.tabId);
-    ctx.documentCache.overlayBackendNodeIds.set(document.id, internalBackendNodeIds);
-  }
-  const captured = await captureFailureSnapshot(deps.cdp, ctx, target.tabId, {
-    ...params,
-    internalBackendNodeIds,
-  });
-  if (isRpcError(captured)) return captured;
-  if (!document) {
-    return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let internalBackendNodeIds = document
+      ? ctx.documentCache.overlayBackendNodeIds.get(document.id)
+      : undefined;
+    if (document && internalBackendNodeIds) {
+      incrementRuntimeCounter(cdp, "overlay_cache_hits");
+    }
+    if (document && !internalBackendNodeIds) {
+      incrementRuntimeCounter(cdp, "overlay_cache_misses");
+      internalBackendNodeIds = await findInternalOverlayBackendNodeIds(cdp, tabId);
+      ctx.documentCache.overlayBackendNodeIds.set(document.id, internalBackendNodeIds);
+    }
+    const captured = await captureFailureSnapshot(cdp, ctx, tabId, {
+      ...params,
+      internalBackendNodeIds,
+    });
+    if (isRpcError(captured)) return captured;
+
+    // Without identities on both sides we cannot prove that the AX tree and
+    // document version describe one stable page. Return the full observation
+    // but do not let it become an incremental-cache baseline.
+    if (!document) {
+      return { ...captured, snapshot_kind: "full" };
+    }
+    const documentAfter = await readDocumentIdentity(cdp, tabId);
+    if (!documentAfter) {
+      return { ...captured, snapshot_kind: "full" };
+    }
+    if (!sameDocument(document, documentAfter)) {
+      if (attempt === 0) {
+        document = documentAfter;
+        continue;
+      }
+      return { ...captured, snapshot_kind: "full" };
+    }
+
+    const previous =
+      cached && cached.document.id === documentAfter.id ? (cached.value as SnapshotResult) : null;
+    const full: SnapshotResult = {
       ...captured,
       snapshot_kind: "full",
-    });
-  }
+      document_id: documentAfter.id,
+      document_version: documentAfter.version,
+      removed_refs: [],
+    };
+    ctx.documentCache.snapshots.set(cacheKey, { document: documentAfter, value: full });
+    if (!params.incremental || !previous) return full;
 
-  const previous =
-    cached && cached.document.id === document.id ? (cached.value as SnapshotResult) : null;
-  const full: SnapshotResult = {
-    ...captured,
-    snapshot_kind: "full",
-    document_id: document.id,
-    document_version: document.version,
-    removed_refs: [],
-  };
-  ctx.documentCache.snapshots.set(cacheKey, { document, value: full });
-  if (params.incremental && previous) {
     const delta = snapshotDelta(previous.text, full.text);
-    return attachDialogs(deps.cdp, target.tabId, dialogCursor, {
+    // A delta that is almost as large as the current tree (or removes almost
+    // the entire previous tree) costs more to interpret than a full Snapshot
+    // and is a poor ref-reuse signal. Return the already captured full result
+    // so interaction callers can report `full_required` explicitly.
+    if (snapshotDeltaTooLarge(previous, full, delta)) return full;
+    return {
       ...full,
       text: delta.text,
       snapshot_kind: "incremental",
       base_document_version: cached?.document.version,
       removed_refs: delta.removedRefs,
-    });
+    };
   }
-  return attachDialogs(deps.cdp, target.tabId, dialogCursor, full);
+
+  // The loop always returns. Keep a defensive protocol-level failure rather
+  // than manufacturing an empty Snapshot if it is ever changed incorrectly.
+  return { code: "protocol_error", message: "snapshot capture ended without a result" };
+}
+
+const SNAPSHOT_DELTA_FULL_RATIO = 0.8;
+
+function snapshotDeltaTooLarge(
+  previous: SnapshotResult,
+  current: SnapshotResult,
+  delta: { text: string; removedRefs: string[] },
+): boolean {
+  const fullBytes = utf8ByteLength(current.text);
+  const addedRatio = fullBytes === 0 ? 0 : utf8ByteLength(delta.text) / fullBytes;
+  const removedRatio = previous.ref_count === 0 ? 0 : delta.removedRefs.length / previous.ref_count;
+  return addedRatio >= SNAPSHOT_DELTA_FULL_RATIO || removedRatio >= SNAPSHOT_DELTA_FULL_RATIO;
+}
+
+function sessionSnapshotCacheKey(tabId: number, params: SessionSnapshotOptions = {}): string {
+  return `${tabId}:${params.max_depth ?? ""}:${params.max_tokens ?? ""}`;
+}
+
+/** True only when the default Snapshot cache exactly matches the pre-action document. */
+export function hasSessionSnapshotBaseline(
+  ctx: SessionContext,
+  tabId: number,
+  document: DocumentIdentity,
+): boolean {
+  const cached = ctx.documentCache.snapshots.get(sessionSnapshotCacheKey(tabId));
+  return Boolean(cached && sameDocument(cached.document, document));
 }
 
 function snapshotDelta(previous: string, current: string): { text: string; removedRefs: string[] } {

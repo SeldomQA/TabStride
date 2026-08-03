@@ -3,8 +3,10 @@
 use std::time::Duration;
 
 use clap::Parser;
+use tabstride::cli::client::ClientTransport;
 use tabstride::cli::daemon::{DaemonCmd, parse_duration};
 use tabstride::cli::flow::FlowCmd;
+use tabstride::cli::interaction::CliPageUpdate;
 use tabstride::cli::metrics::MetricsCmd;
 use tabstride::cli::navigate::NavigateCmd;
 use tabstride::cli::session::{CliSessionMode, CliTabTarget, SessionSub};
@@ -62,6 +64,57 @@ fn parses_persistent_native_client_timeout() {
 }
 
 #[test]
+fn parses_skill_execution_path_commands() {
+    let cli = parse(&[
+        "tabstride",
+        "session",
+        "start",
+        "--mode",
+        "attach",
+        "--tab",
+        "active",
+        "--snapshot",
+    ]);
+    let Command::Session(command) = cli.command else {
+        panic!("expected session command");
+    };
+    assert!(matches!(command.sub, SessionSub::Start(_)));
+
+    let cli = parse(&[
+        "tabstride",
+        "--json",
+        "flow",
+        "run",
+        "task.yaml",
+        "--session",
+        "abcd",
+        "--var",
+        "task=write-code",
+    ]);
+    assert!(cli.flags.json);
+    assert!(matches!(cli.command, Command::Flow(FlowCmd::Run(_))));
+
+    let cli = parse(&[
+        "tabstride",
+        "client",
+        "--transport",
+        "websocket",
+        "--timeout",
+        "35s",
+    ]);
+    let Command::Client(args) = cli.command else {
+        panic!("expected persistent client");
+    };
+    assert_eq!(args.transport, ClientTransport::Websocket);
+
+    let cli = parse(&["tabstride", "session", "stop", "abcd"]);
+    let Command::Session(command) = cli.command else {
+        panic!("expected session command");
+    };
+    assert!(matches!(command.sub, SessionSub::Stop(_)));
+}
+
+#[test]
 fn parses_flow_validate_and_run() {
     let cli = parse(&["tabstride", "flow", "validate", "demo.yaml"]);
     assert!(matches!(cli.command, Command::Flow(FlowCmd::Validate(_))));
@@ -108,16 +161,97 @@ fn parses_timing_and_metrics_commands() {
         "tool.click",
         "--run-id",
         "todo-baseline-001",
+        "--flow",
+        "todo-demo",
+        "--step-index",
+        "3",
     ]);
-    assert!(matches!(
-        cli.command,
-        Command::Metrics(MetricsCmd::Summary(_))
-    ));
+    let Command::Metrics(MetricsCmd::Summary(filter)) = cli.command else {
+        panic!("expected metrics summary");
+    };
+    assert_eq!(filter.flow.as_deref(), Some("todo-demo"));
+    assert_eq!(filter.step_index, Some(3));
     let cli = parse(&["tabstride", "metrics", "export", "--out", "metrics.json"]);
     assert!(matches!(
         cli.command,
         Command::Metrics(MetricsCmd::Export(_))
     ));
+}
+
+#[test]
+fn parses_page_update_for_every_interaction_command() {
+    let cli = parse(&[
+        "tabstride",
+        "click",
+        "@e1",
+        "--session",
+        "abcd",
+        "--page-update",
+        "delta",
+    ]);
+    let Command::Click(args) = cli.command else {
+        panic!("expected click command");
+    };
+    assert_eq!(args.page_update, CliPageUpdate::Delta);
+
+    let cli = parse(&[
+        "tabstride",
+        "fill",
+        "@e1",
+        "--value",
+        "hello",
+        "--session",
+        "abcd",
+        "--page-update",
+        "none",
+    ]);
+    let Command::Fill(args) = cli.command else {
+        panic!("expected fill command");
+    };
+    assert_eq!(args.page_update, CliPageUpdate::None);
+
+    let cli = parse(&[
+        "tabstride",
+        "press",
+        "Enter",
+        "--session",
+        "abcd",
+        "--page-update",
+        "signal",
+    ]);
+    let Command::Press(args) = cli.command else {
+        panic!("expected press command");
+    };
+    assert_eq!(args.page_update, CliPageUpdate::Signal);
+
+    let cli = parse(&[
+        "tabstride",
+        "select",
+        "@e1",
+        "--value",
+        "SG",
+        "--session",
+        "abcd",
+        "--page-update",
+        "delta",
+    ]);
+    let Command::Select(args) = cli.command else {
+        panic!("expected select command");
+    };
+    assert_eq!(args.page_update, CliPageUpdate::Delta);
+
+    assert!(
+        Cli::try_parse_from([
+            "tabstride",
+            "click",
+            "@e1",
+            "--session",
+            "abcd",
+            "--page-update",
+            "invalid",
+        ])
+        .is_err()
+    );
 }
 
 #[test]

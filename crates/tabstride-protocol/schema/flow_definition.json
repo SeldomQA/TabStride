@@ -192,6 +192,16 @@
         "target"
       ],
       "properties": {
+        "page_update": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageUpdateMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "tab_id": {
           "type": [
             "integer",
@@ -236,6 +246,16 @@
           "type": [
             "boolean",
             "null"
+          ]
+        },
+        "page_update": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageUpdateMode"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "tab_id": {
@@ -349,6 +369,16 @@
             "$ref": "#/definitions/KeyModifier"
           }
         },
+        "page_update": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageUpdateMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "tab_id": {
           "type": [
             "integer",
@@ -450,6 +480,16 @@
         "values"
       ],
       "properties": {
+        "page_update": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PageUpdateMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "tab_id": {
           "type": [
             "integer",
@@ -724,6 +764,32 @@
         }
       },
       "additionalProperties": false
+    },
+    "PageUpdateMode": {
+      "description": "Amount of page-state information requested after an interaction.",
+      "oneOf": [
+        {
+          "description": "Skip document identity reads and Snapshot work.",
+          "type": "string",
+          "enum": [
+            "none"
+          ]
+        },
+        {
+          "description": "Return only the lightweight changed/unchanged/unknown signal.",
+          "type": "string",
+          "enum": [
+            "signal"
+          ]
+        },
+        {
+          "description": "Return a Snapshot delta when a compatible baseline exists.",
+          "type": "string",
+          "enum": [
+            "delta"
+          ]
+        }
+      ]
     },
     "WaitUntil": {
       "description": "Page-lifecycle checkpoint a navigation should wait on.\n\nMapping to CDP `Page.lifecycleEvent` names: * `Load` → `load` * `DomContentLoaded` → `DOMContentLoaded` * `NetworkIdle` → `networkIdle` * `Commit` → `commit` (earliest event after the navigation actually commits to a new document)",

@@ -1,7 +1,8 @@
 import { readDocumentIdentity } from "@/session-manager/document-cache";
 import type { SessionManager } from "@/session-manager/manager";
 import type { RpcError } from "@/transport/types";
-import { type CdpRunner, captureFailureSnapshot } from "./observation";
+import { type CdpRunner, captureSessionSnapshot } from "./observation";
+import { resolveTargetTab } from "./shared";
 import {
   type AgentOverlayResetApi,
   chromeAgentOverlayResetApi,
@@ -35,10 +36,14 @@ export interface SessionStartResult {
   snapshot_ref_count?: number;
   /** Whether the initial snapshot was truncated. */
   snapshot_truncated?: boolean;
+  /** Whether the requested initial snapshot was captured successfully. */
+  snapshot_available?: boolean;
+  /** Structured capture failure. The session itself remains usable. */
+  snapshot_error?: RpcError;
 }
 
 export interface SessionStartDeps {
-  tabs?: Pick<typeof chrome.tabs, "get">;
+  tabs?: Pick<typeof chrome.tabs, "get"> & Partial<Pick<typeof chrome.tabs, "query">>;
   windows?: Pick<typeof chrome.windows, "getLastFocused" | "getAll">;
   /** CDP runner required when `snapshot` is requested. */
   cdp?: CdpRunner;
@@ -192,28 +197,18 @@ export async function handleSessionStart(
         params,
         deps,
       );
-      if ("code" in snapshot) {
-        return { ...snapshot, attached_tab_id: ctx.attachedTabId };
-      }
       return { attached_tab_id: ctx.attachedTabId, ...snapshot };
     }
     const ctx = await manager.start(params.session_id);
     const snapshot = await captureInitialSnapshot(
       manager,
       ctx,
-      ctx.agentWindowId,
+      undefined,
       undefined,
       undefined,
       params,
       deps,
     );
-    if ("code" in snapshot) {
-      // Snapshot failure is non-fatal for isolated sessions (page may
-      // still be loading about:blank). Return the session without
-      // snapshot data so the agent can proceed and take a snapshot
-      // once the page has loaded.
-      return { agent_window_id: ctx.agentWindowId };
-    }
     return { agent_window_id: ctx.agentWindowId, ...snapshot };
   } catch (err) {
     return {
@@ -232,84 +227,94 @@ export async function handleSessionStart(
 async function captureInitialSnapshot(
   manager: SessionManager,
   ctx: { sessionId: string },
-  targetId: number,
+  targetTabId: number | undefined,
   fallbackUrl: string | undefined,
   fallbackTitle: string | undefined,
   params: SessionStartParams,
   deps: SessionStartDeps,
-): Promise<Partial<SessionStartResult> | RpcError> {
+): Promise<Partial<SessionStartResult>> {
   if (!params.snapshot) {
     return {};
   }
   if (!deps.cdp) {
-    return { code: "cdp_failed", message: "snapshot requested but CDP is unavailable" };
+    return snapshotUnavailable({
+      code: "cdp_failed",
+      message: "snapshot requested but CDP is unavailable",
+    });
   }
   const cdp = deps.cdp;
-  const tabsApi = deps.tabs ?? chrome.tabs;
+  const tabsApi = {
+    get: deps.tabs?.get ?? ((tabId: number) => chrome.tabs.get(tabId)),
+    query: deps.tabs?.query ?? ((query: chrome.tabs.QueryInfo) => chrome.tabs.query(query)),
+  };
+
+  const ctxFull = manager.get(ctx.sessionId);
+  if (!ctxFull) {
+    return snapshotUnavailable({
+      code: "not_found",
+      message: `session ${ctx.sessionId} unknown during initial snapshot`,
+    });
+  }
+  const target = await resolveTargetTab(manager, ctxFull, targetTabId, tabsApi);
+  if ("code" in target) return snapshotUnavailable(target);
 
   // Resolve url / title. For attach mode the caller provides them;
   // for isolated mode we read from Chrome.
   let url = fallbackUrl ?? "";
   let title = fallbackTitle ?? "";
-  let tabId = targetId;
   if (!fallbackUrl) {
     try {
-      const tab = await tabsApi.get(targetId);
+      const tab = await tabsApi.get(target.tabId);
       url = tab.url ?? url;
       title = tab.title ?? title;
-      if (typeof tab.id === "number") tabId = tab.id;
     } catch {
       // Non-fatal: proceed without url/title.
     }
   }
 
-  // Resolve document version (best-effort).
-  let documentVersion: number | undefined;
+  // Capture through the same executor as `tool.snapshot`, including ref,
+  // overlay, document-cache, and incremental-baseline semantics.
   try {
-    const docId = await readDocumentIdentity(cdp, tabId);
-    if (docId) documentVersion = docId.version;
-  } catch {
-    // Non-fatal.
-  }
-
-  // Capture the accessibility snapshot.
-  const ctxFull = manager.get(ctx.sessionId);
-  if (!ctxFull) {
-    return {
-      url: url || undefined,
-      title: title || undefined,
-      document_version: documentVersion,
-    };
-  }
-
-  try {
-    const snapshot = await captureFailureSnapshot(cdp, ctxFull, tabId, { max_depth: 16 });
+    const snapshot = await captureSessionSnapshot(cdp, ctxFull, target.tabId);
     if ("code" in snapshot) {
-      // Snapshot capture failed; return metadata without snapshot text
-      // so the agent can retry with a dedicated `tool.snapshot` call.
       console.warn("[tabstride session_start] initial snapshot capture failed", snapshot);
+      let documentVersion: number | undefined;
+      try {
+        documentVersion = (await readDocumentIdentity(cdp, target.tabId))?.version;
+      } catch {
+        // Preserve the original capture error; document metadata is optional.
+      }
       return {
         url: url || undefined,
         title: title || undefined,
         document_version: documentVersion,
+        ...snapshotUnavailable(snapshot),
       };
     }
     return {
       url: url || undefined,
       title: title || undefined,
-      document_version: documentVersion,
-      snapshot_text: snapshot.text || undefined,
+      document_version: snapshot.document_version,
+      snapshot_text: snapshot.text,
       snapshot_ref_count: snapshot.ref_count,
       snapshot_truncated: snapshot.truncated,
+      snapshot_available: true,
     };
   } catch (err) {
     console.warn("[tabstride session_start] initial snapshot capture threw", err);
     return {
       url: url || undefined,
       title: title || undefined,
-      document_version: documentVersion,
+      ...snapshotUnavailable({
+        code: "cdp_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }),
     };
   }
+}
+
+function snapshotUnavailable(error: RpcError): Partial<SessionStartResult> {
+  return { snapshot_available: false, snapshot_error: error };
 }
 
 /**

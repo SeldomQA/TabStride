@@ -144,19 +144,31 @@ fn parse_variable(raw: &str) -> Result<(String, String), String> {
     Ok((key.trim().into(), value.into()))
 }
 
-fn format_step_timing(timing: &StepTiming) -> String {
+pub(crate) fn format_step_timing(timing: &StepTiming) -> String {
     let mut parts = Vec::new();
+    if let Some(v) = timing.local_us {
+        parts.push(format!("local={:.2}ms", v as f64 / 1000.0));
+    }
     if let Some(v) = timing.queue_us {
         parts.push(format!("queue={:.2}ms", v as f64 / 1000.0));
     }
     if let Some(v) = timing.websocket_us {
         parts.push(format!("ws={:.2}ms", v as f64 / 1000.0));
     }
+    if let Some(v) = timing.websocket_roundtrip_us {
+        parts.push(format!("ws_rtt={:.2}ms", v as f64 / 1000.0));
+    }
     if let Some(v) = timing.extension_us {
         parts.push(format!("ext={:.2}ms", v as f64 / 1000.0));
     }
+    if let Some(v) = timing.extension_non_cdp_us {
+        parts.push(format!("ext_non_cdp={:.2}ms", v as f64 / 1000.0));
+    }
     if let Some(v) = timing.cdp_us {
         parts.push(format!("cdp={:.2}ms", v as f64 / 1000.0));
+    }
+    if let Some(v) = timing.cdp_span_us {
+        parts.push(format!("cdp_span={:.2}ms", v as f64 / 1000.0));
     }
     parts.join(" ")
 }
@@ -176,13 +188,20 @@ mod tests {
     #[test]
     fn formats_step_timing_phases() {
         let timing = StepTiming {
+            local_us: None,
             queue_us: Some(1500),
             websocket_us: Some(200),
+            websocket_roundtrip_us: Some(4500),
             extension_us: Some(4200),
+            extension_non_cdp_us: Some(1100),
             cdp_us: Some(3100),
+            cdp_span_us: Some(3600),
         };
         let text = format_step_timing(&timing);
-        assert_eq!(text, "queue=1.50ms ws=0.20ms ext=4.20ms cdp=3.10ms");
+        assert_eq!(
+            text,
+            "queue=1.50ms ws=0.20ms ws_rtt=4.50ms ext=4.20ms ext_non_cdp=1.10ms cdp=3.10ms cdp_span=3.60ms"
+        );
     }
 
     #[test]

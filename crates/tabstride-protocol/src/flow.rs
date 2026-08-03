@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::tools::{AssertionSpec, HelpTarget, KeyModifier, Locator, WaitUntil};
+use crate::tools::{AssertionSpec, HelpTarget, KeyModifier, Locator, PageUpdateMode, WaitUntil};
 use crate::{ErrorCode, RpcError};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -89,6 +89,8 @@ pub struct FlowClickStep {
     pub tab_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_update: Option<PageUpdateMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -102,6 +104,8 @@ pub struct FlowFillStep {
     pub clear_before: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_update: Option<PageUpdateMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -118,6 +122,8 @@ pub struct FlowPressStep {
     pub hold_ms: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_update: Option<PageUpdateMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -129,6 +135,8 @@ pub struct FlowSelectStep {
     pub tab_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_update: Option<PageUpdateMode>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -224,18 +232,31 @@ pub struct FlowRunParams {
 /// Per-step timing phase breakdown (all values in microseconds).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct StepTiming {
+    /// Daemon-observed execution time when the step is local (such as
+    /// `wait_ms`) or cancellation wins before transport phase Timing returns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_us: Option<u64>,
     /// Time waiting in the per-session dispatch queue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_us: Option<u64>,
-    /// WebSocket round-trip to the extension.
+    /// WebSocket transport in both directions, excluding extension execution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub websocket_us: Option<u64>,
-    /// Extension-side processing (receive → reply).
+    /// Daemon send → daemon response receive, including extension execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub websocket_roundtrip_us: Option<u64>,
+    /// Total extension-side processing (receive → reply), including CDP.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extension_us: Option<u64>,
-    /// CDP command execution inside the extension.
+    /// Extension-side processing excluding accumulated CDP command time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_non_cdp_us: Option<u64>,
+    /// Sum of each individual CDP command execution inside the extension.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cdp_us: Option<u64>,
+    /// First CDP start → last CDP finish; may include waits between commands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cdp_span_us: Option<u64>,
 }
 
 impl StepTiming {
@@ -269,6 +290,10 @@ pub struct FlowFailureData {
     pub failed_method: String,
     pub duration_ms: u64,
     pub completed_steps: Vec<FlowStepResult>,
+    /// Result metadata for the step that failed after execution started.
+    /// Validation failures or cancellation before dispatch leave this absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_step_result: Option<FlowStepResult>,
     pub cause: RpcError,
 }
 
@@ -363,6 +388,7 @@ steps:
   - fill:
       target: { css: input }
       value: "{{value}}"
+      page_update: delta
   - press:
       key: Enter
       target:
@@ -397,6 +423,10 @@ assertions:
         assert_eq!(flow.steps.len(), 8);
         assert_eq!(flow.assertions.len(), 1);
         flow.validate().unwrap();
+        let FlowStep::Fill(entry) = &flow.steps[1] else {
+            panic!("expected fill step");
+        };
+        assert_eq!(entry.fill.page_update, Some(PageUpdateMode::Delta));
         let FlowStep::Press(entry) = &flow.steps[2] else {
             panic!("expected press step");
         };
@@ -523,6 +553,7 @@ assertions:
             websocket_us: None,
             extension_us: Some(3400),
             cdp_us: Some(2800),
+            ..StepTiming::default()
         };
         let json = serde_json::to_value(&timing).unwrap();
         assert_eq!(json["queue_us"], 120);
@@ -552,5 +583,32 @@ assertions:
         };
         let json = serde_json::to_value(&with_timing).unwrap();
         assert_eq!(json["timing"]["cdp_us"], 900);
+    }
+
+    #[test]
+    fn legacy_flow_failure_without_failed_result_remains_compatible() {
+        let failure: FlowFailureData = serde_json::from_value(serde_json::json!({
+            "flow_name": "legacy",
+            "failed_step": 1,
+            "failed_method": "tool.click",
+            "duration_ms": 10,
+            "completed_steps": [],
+            "cause": {
+                "code": "timeout",
+                "message": "timed out"
+            }
+        }))
+        .unwrap();
+        assert!(failure.failed_step_result.is_none());
+    }
+
+    #[test]
+    fn local_step_timing_does_not_serialize_browser_phases() {
+        let timing = StepTiming {
+            local_us: Some(2_500),
+            ..StepTiming::default()
+        };
+        let value = serde_json::to_value(timing).unwrap();
+        assert_eq!(value, serde_json::json!({"local_us": 2_500}));
     }
 }

@@ -19,13 +19,13 @@ use tabstride_protocol::system::{HandshakeParams, HandshakeResult};
 use tabstride_protocol::tools::{
     AssertParams, AssertResult, AssertionSpec, ClickParams, ClickResult, FillParams, FillResult,
     HelpOutcome, KeyModifier, Locator, MouseButton, NavigateBackParams, NavigateBackResult,
-    NavigateForwardParams, NavigateForwardResult, NavigateParams, NavigateResult, PressParams,
-    PressResult, ReloadParams, ReloadResult, RequestHelpParams, RequestHelpResult, SelectParams,
-    SelectResult, SessionStartParams, SessionStartResult, WaitUntil,
+    NavigateForwardParams, NavigateForwardResult, NavigateParams, NavigateResult, PageUpdateMode,
+    PressParams, PressResult, ReloadParams, ReloadResult, RequestHelpParams, RequestHelpResult,
+    SelectParams, SelectResult, SessionStartParams, SessionStartResult, WaitUntil,
 };
 use tabstride_protocol::{
-    BrowserPeerInfo, ErrorCode, FlowDefinition, FlowRunParams, FlowRunResult, Frame, Method,
-    RequestFrame, ResponseBody, ResponseFrame, RpcError,
+    BrowserPeerInfo, ErrorCode, FlowDefinition, FlowFailureData, FlowRunParams, FlowRunResult,
+    Frame, Method, RequestFrame, ResponseBody, ResponseFrame, RpcError,
 };
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -147,7 +147,7 @@ where
                 Err(_) => continue,
             };
             let Frame::Request(req) = frame else { continue };
-            let body = match req.method {
+            let mut body = match req.method {
                 Method::ToolSessionStart => {
                     let _: SessionStartParams =
                         serde_json::from_value(req.params.clone().unwrap()).unwrap();
@@ -165,6 +165,33 @@ where
                 Method::ToolSessionStop => ResponseBody::Ok(json!({})),
                 _ => reply(&req),
             };
+            if let Some(mut timing) = req.timing.clone() {
+                let sent_at = timing
+                    .get("extension_sent_at")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default();
+                if let Some(object) = timing.as_object_mut() {
+                    object.insert("extension_received_at".into(), json!(sent_at + 1));
+                    object.insert("extension_replied_at".into(), json!(sent_at + 2));
+                    object.insert("extension_response_sent_at".into(), json!(sent_at + 3));
+                }
+                match &mut body {
+                    ResponseBody::Ok(value) => {
+                        value
+                            .as_object_mut()
+                            .unwrap()
+                            .insert("__tabstride_timing".into(), timing);
+                    }
+                    ResponseBody::Err(error) => {
+                        error
+                            .data
+                            .get_or_insert_with(|| json!({}))
+                            .as_object_mut()
+                            .unwrap()
+                            .insert("__tabstride_timing".into(), timing);
+                    }
+                }
+            }
             let resp = ResponseFrame {
                 id: req.id.clone(),
                 body,
@@ -299,6 +326,15 @@ async fn five_step_flow_reuses_the_existing_tool_queue() {
     .await
     .expect("flow ok");
     assert_eq!(result.completed_steps.len(), 5);
+    for (index, step) in result.completed_steps.iter().enumerate() {
+        assert_eq!(step.index, index + 1);
+        let timing = step.timing.as_ref().expect("real dispatch timing");
+        assert!(timing.queue_us.is_some());
+        assert!(timing.websocket_us.is_some());
+        assert!(timing.websocket_roundtrip_us.is_some());
+        assert!(timing.extension_us.is_some());
+        assert!(timing.local_us.is_none());
+    }
     assert_eq!(
         *seen.lock().unwrap(),
         [
@@ -308,6 +344,115 @@ async fn five_step_flow_reuses_the_existing_tool_queue() {
             "tool.click",
             "tool.snapshot"
         ]
+    );
+    handle.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_extension_step_keeps_timing_and_business_error_data() {
+    let (handle, sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    let _ = do_handshake(&mut ws).await;
+    run_extension(ws, |req| {
+        assert_eq!(req.method, Method::ToolClick);
+        ResponseBody::Err(RpcError {
+            code: ErrorCode::Timeout,
+            message: "element remained obscured".into(),
+            data: Some(json!({
+                "reason": "element_obscured",
+                "failed_check": "receives_events"
+            })),
+        })
+    });
+
+    let session_id = ipc_session_start(&sock).await;
+    let flow: FlowDefinition = serde_yaml::from_str(
+        r#"name: failed-timing
+steps:
+  - click:
+      target: { role: button, name: Save, exact: true }
+"#,
+    )
+    .unwrap();
+    let error = ipc_tool_call::<_, FlowRunResult>(
+        &sock,
+        Method::FlowRun,
+        FlowRunParams {
+            session_id,
+            flow,
+            variables: Default::default(),
+        },
+    )
+    .await
+    .unwrap_err();
+
+    let failure: FlowFailureData = serde_json::from_value(error.data.unwrap()).unwrap();
+    let failed = failure.failed_step_result.expect("failed step result");
+    assert_eq!(failed.index, 1);
+    assert_eq!(failed.method, "tool.click");
+    let timing = failed.timing.expect("failed dispatch timing");
+    assert!(timing.queue_us.is_some());
+    assert!(timing.websocket_us.is_some());
+    assert!(timing.extension_us.is_some());
+    assert_eq!(failed.output["reason"], "element_obscured");
+    assert!(failed.output.get("__tabstride_timing").is_none());
+    assert_eq!(
+        failure.cause.data.unwrap()["failed_check"],
+        "receives_events"
+    );
+    handle.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn user_aborted_step_keeps_dispatch_timing() {
+    let (handle, sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    let _ = do_handshake(&mut ws).await;
+    run_extension(ws, |req| {
+        assert_eq!(req.method, Method::ToolRequestHelp);
+        ResponseBody::Ok(
+            serde_json::to_value(RequestHelpResult {
+                outcome: HelpOutcome::Cancelled,
+                note: None,
+                tab_id: 17,
+                resolved_targets: None,
+            })
+            .unwrap(),
+        )
+    });
+
+    let session_id = ipc_session_start(&sock).await;
+    let flow: FlowDefinition = serde_yaml::from_str(
+        r#"name: user-aborted-timing
+steps:
+  - request_help:
+      prompt: Confirm the operation
+"#,
+    )
+    .unwrap();
+    let error = ipc_tool_call::<_, FlowRunResult>(
+        &sock,
+        Method::FlowRun,
+        FlowRunParams {
+            session_id,
+            flow,
+            variables: Default::default(),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::UserAborted);
+    let failure: FlowFailureData = serde_json::from_value(error.data.unwrap()).unwrap();
+    let failed = failure
+        .failed_step_result
+        .expect("user-aborted step result");
+    assert_eq!(failed.method, "tool.request_help");
+    assert!(
+        failed
+            .timing
+            .expect("user-aborted timing")
+            .websocket_us
+            .is_some()
     );
     handle.shutdown().await;
 }
@@ -341,7 +486,9 @@ async fn complete_flow_runtime_runs_select_wait_help_and_final_assertion_in_orde
                         selected_labels: vec!["Singapore".into()],
                         dialogs: vec![],
                         document_changed: false,
+                        document_change_known: true,
                         document_version: None,
+                        snapshot_delta: None,
                     })
                     .unwrap(),
                 )
@@ -438,7 +585,10 @@ async fn individual_cli_rpc_and_flow_share_the_same_locator_wire_shape() {
     let (handle, sock) = spawn_daemon().await;
     let mut ws = connect_ext(handle.ws_addr()).await;
     let _ = do_handshake(&mut ws).await;
-    let seen = Arc::new(std::sync::Mutex::new(Vec::<Locator>::new()));
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<(
+        Locator,
+        Option<PageUpdateMode>,
+    )>::new()));
     let seen_by_extension = Arc::clone(&seen);
     run_extension(ws, move |req| {
         assert_eq!(req.method, Method::ToolClick);
@@ -447,7 +597,7 @@ async fn individual_cli_rpc_and_flow_share_the_same_locator_wire_shape() {
         seen_by_extension
             .lock()
             .unwrap()
-            .push(params.target.clone());
+            .push((params.target.clone(), params.page_update));
         ResponseBody::Ok(
             serde_json::to_value(ClickResult {
                 tab_id: 17,
@@ -458,7 +608,9 @@ async fn individual_cli_rpc_and_flow_share_the_same_locator_wire_shape() {
                 y: 20.0,
                 dialogs: vec![],
                 document_changed: false,
+                document_change_known: true,
                 document_version: None,
+                snapshot_delta: None,
             })
             .unwrap(),
         )
@@ -482,6 +634,7 @@ async fn individual_cli_rpc_and_flow_share_the_same_locator_wire_shape() {
             click_count: None,
             modifiers: None,
             timeout_ms: Some(5_000),
+            page_update: None,
         },
     )
     .await
@@ -495,6 +648,7 @@ steps:
         role: button
         name: Save
         exact: true
+      page_update: delta
 "#,
     )
     .unwrap();
@@ -514,7 +668,13 @@ steps:
 
     assert_eq!(direct.used_target, target);
     assert_eq!(flow_click.used_target, target);
-    assert_eq!(*seen.lock().unwrap(), vec![target.clone(), target]);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![
+            (target.clone(), None),
+            (target, Some(PageUpdateMode::Delta))
+        ]
+    );
     handle.shutdown().await;
 }
 
@@ -729,7 +889,9 @@ async fn click_round_trips_ref_and_modifiers() {
                 y: 34.0,
                 dialogs: vec![],
                 document_changed: false,
+                document_change_known: true,
                 document_version: None,
+                snapshot_delta: None,
             })
             .unwrap(),
         )
@@ -747,6 +909,7 @@ async fn click_round_trips_ref_and_modifiers() {
             click_count: Some(1),
             modifiers: Some(vec![KeyModifier::Ctrl, KeyModifier::Shift]),
             timeout_ms: Some(5_000),
+            page_update: None,
         },
     )
     .await
@@ -777,7 +940,9 @@ async fn fill_round_trips_clear_before_default() {
                 value_length: 11,
                 dialogs: vec![],
                 document_changed: false,
+                document_change_known: true,
                 document_version: None,
+                snapshot_delta: None,
             })
             .unwrap(),
         )
@@ -794,6 +959,7 @@ async fn fill_round_trips_clear_before_default() {
             tab_id: None,
             clear_before: None,
             timeout_ms: Some(5_000),
+            page_update: None,
         },
     )
     .await
@@ -822,7 +988,9 @@ async fn press_round_trips_compound_key() {
                 used_target: None,
                 dialogs: vec![],
                 document_changed: false,
+                document_change_known: true,
                 document_version: None,
+                snapshot_delta: None,
             })
             .unwrap(),
         )
@@ -840,6 +1008,7 @@ async fn press_round_trips_compound_key() {
             tab_id: None,
             hold_ms: None,
             timeout_ms: Some(5_000),
+            page_update: None,
         },
     )
     .await
@@ -870,7 +1039,9 @@ async fn select_round_trips_values() {
                 selected_labels: vec!["United States".into(), "Canada".into()],
                 dialogs: vec![],
                 document_changed: false,
+                document_change_known: true,
                 document_version: None,
+                snapshot_delta: None,
             })
             .unwrap(),
         )
@@ -886,6 +1057,7 @@ async fn select_round_trips_values() {
             target: ref_locator("@e3"),
             tab_id: None,
             timeout_ms: Some(5_000),
+            page_update: None,
         },
     )
     .await
@@ -989,6 +1161,7 @@ async fn m7_tools_propagate_extension_errors() {
             click_count: None,
             modifiers: None,
             timeout_ms: Some(5_000),
+            page_update: None,
         },
     )
     .await
@@ -1005,6 +1178,7 @@ async fn m7_tools_propagate_extension_errors() {
             tab_id: None,
             clear_before: None,
             timeout_ms: Some(5_000),
+            page_update: None,
         },
     )
     .await
@@ -1022,6 +1196,7 @@ async fn m7_tools_propagate_extension_errors() {
             tab_id: None,
             hold_ms: None,
             timeout_ms: Some(5_000),
+            page_update: None,
         },
     )
     .await
@@ -1037,6 +1212,7 @@ async fn m7_tools_propagate_extension_errors() {
             target: ref_locator("@e1"),
             tab_id: None,
             timeout_ms: Some(5_000),
+            page_update: None,
         },
     )
     .await

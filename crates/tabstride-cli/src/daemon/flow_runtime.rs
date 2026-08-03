@@ -11,9 +11,10 @@ use tabstride_protocol::{
     FlowStep, FlowStepResult, HelpOutcome, Method, RequestHelpResult, ResponseBody, RpcError,
     RpcId, StepTiming,
 };
+use tracing::debug;
 
 use super::state::DaemonState;
-use crate::timing::take_trace;
+use crate::timing::{MetricRecord, TimingTrace, append_metric, epoch_us, put_trace, take_trace};
 
 const DEFAULT_FLOW_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_FLOW_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -22,6 +23,7 @@ pub async fn handle_flow_run(
     state: &Arc<DaemonState>,
     rpc_id: RpcId,
     params: Value,
+    parent_timing: TimingTrace,
 ) -> ResponseBody {
     let params: FlowRunParams = match serde_json::from_value(params) {
         Ok(params) => params,
@@ -75,6 +77,7 @@ pub async fn handle_flow_run(
                 &method_name,
                 started,
                 completed,
+                None,
                 cancelled_error(),
             );
         }
@@ -85,13 +88,31 @@ pub async fn handle_flow_run(
                 &method_name,
                 started,
                 completed,
+                None,
                 timeout_error(timeout),
             );
         };
 
         let child_rpc_id = format!("{rpc_id}:step:{}", index + 1);
-        let step_params = step.into_params(&params.session_id);
+        let mut step_params = step.into_params(&params.session_id);
         let step_started = Instant::now();
+        let is_local = method == Method::ToolWaitMs;
+        if !is_local {
+            put_trace(
+                &mut step_params,
+                &TimingTrace {
+                    run_id: parent_timing.run_id.clone(),
+                    flow_name: Some(name.clone()),
+                    flow_step_index: Some(index + 1),
+                    agent_received_at: Some(epoch_us()),
+                    // Flow owns semantic outcome recording after request_help
+                    // and cancellation normalization, so child dispatch must
+                    // never persist a duplicate transport-level metric.
+                    skip_metric: true,
+                    ..TimingTrace::default()
+                },
+            );
+        }
         let dispatch = dispatch_step(state, child_rpc_id.clone(), method.clone(), step_params);
         tokio::pin!(dispatch);
 
@@ -99,24 +120,32 @@ pub async fn handle_flow_run(
             body = &mut dispatch => body,
             _ = token.cancelled() => {
                 super::ipc::cancel_rpc(state, &child_rpc_id);
-                let _ = tokio::time::timeout(Duration::from_secs(2), &mut dispatch).await;
-                ResponseBody::Err(cancelled_error())
+                let observed = tokio::time::timeout(Duration::from_secs(2), &mut dispatch).await.ok();
+                terminal_error_with_observed_data(cancelled_error(), observed)
             }
             _ = tokio::time::sleep(remaining) => {
                 super::ipc::cancel_rpc(state, &child_rpc_id);
-                let _ = tokio::time::timeout(Duration::from_secs(2), &mut dispatch).await;
-                ResponseBody::Err(timeout_error(timeout))
+                let observed = tokio::time::timeout(Duration::from_secs(2), &mut dispatch).await.ok();
+                terminal_error_with_observed_data(timeout_error(timeout), observed)
             }
         };
 
         match normalize_step_body(&method, body) {
             ResponseBody::Ok(mut output) => {
-                let timing = take_trace(&mut output).map(|trace| StepTiming {
-                    queue_us: trace.queue_wait_us(),
-                    websocket_us: trace.websocket_us(),
-                    extension_us: trace.extension_dispatch_us(),
-                    cdp_us: trace.cdp_us(),
-                });
+                let duration_us = elapsed_us(step_started);
+                let (timing, trace) = take_step_timing(&mut output, is_local, duration_us);
+                if parent_timing.agent_received_at.is_some() {
+                    record_step_metric(
+                        &parent_timing,
+                        &name,
+                        index + 1,
+                        &method_name,
+                        &params.session_id,
+                        "ok",
+                        duration_us,
+                        trace,
+                    );
+                }
                 completed.push(FlowStepResult {
                     index: index + 1,
                     method: method_name,
@@ -125,8 +154,41 @@ pub async fn handle_flow_run(
                     output,
                 });
             }
-            ResponseBody::Err(cause) => {
-                return flow_failure(&name, index, &method_name, started, completed, cause);
+            ResponseBody::Err(mut cause) => {
+                let duration_us = elapsed_us(step_started);
+                let mut output = cause.data.take().unwrap_or(Value::Null);
+                let (timing, trace) = take_step_timing(&mut output, is_local, duration_us);
+                if !output.is_null() {
+                    cause.data = Some(output.clone());
+                }
+                if parent_timing.agent_received_at.is_some() {
+                    record_step_metric(
+                        &parent_timing,
+                        &name,
+                        index + 1,
+                        &method_name,
+                        &params.session_id,
+                        "error",
+                        duration_us,
+                        trace,
+                    );
+                }
+                let failed_step_result = FlowStepResult {
+                    index: index + 1,
+                    method: method_name.clone(),
+                    duration_ms: elapsed_ms(step_started),
+                    timing,
+                    output,
+                };
+                return flow_failure(
+                    &name,
+                    index,
+                    &method_name,
+                    started,
+                    completed,
+                    Some(failed_step_result),
+                    cause,
+                );
             }
         }
     }
@@ -314,6 +376,7 @@ fn flow_failure(
     method: &str,
     started: Instant,
     completed_steps: Vec<FlowStepResult>,
+    failed_step_result: Option<FlowStepResult>,
     cause: RpcError,
 ) -> ResponseBody {
     let code = cause.code;
@@ -328,6 +391,7 @@ fn flow_failure(
         failed_method: method.into(),
         duration_ms: elapsed_ms(started),
         completed_steps,
+        failed_step_result,
         cause,
     };
     ResponseBody::Err(RpcError {
@@ -371,6 +435,107 @@ fn error_body(code: ErrorCode, message: impl Into<String>) -> ResponseBody {
 
 fn elapsed_ms(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+fn elapsed_us(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX)
+}
+
+fn take_step_timing(
+    output: &mut Value,
+    is_local: bool,
+    duration_us: u64,
+) -> (Option<StepTiming>, Option<TimingTrace>) {
+    if is_local {
+        return (
+            Some(StepTiming {
+                local_us: Some(duration_us),
+                ..StepTiming::default()
+            }),
+            None,
+        );
+    }
+    let mut trace = take_trace(output);
+    if let Some(trace) = &mut trace {
+        trace.serve_replied_at = Some(epoch_us());
+    }
+    if trace.is_none() {
+        // Cancellation can win before the extension's response (and its
+        // embedded phase trace) reaches the daemon. Preserve the duration we
+        // did observe instead of returning a failed step with no Timing.
+        return (
+            Some(StepTiming {
+                local_us: Some(duration_us),
+                ..StepTiming::default()
+            }),
+            None,
+        );
+    }
+    let timing = trace
+        .as_ref()
+        .map(|trace| StepTiming {
+            queue_us: trace.queue_wait_us(),
+            websocket_us: trace.websocket_us(),
+            websocket_roundtrip_us: trace.websocket_roundtrip_us(),
+            extension_us: trace.extension_dispatch_us(),
+            extension_non_cdp_us: trace.extension_non_cdp_us(),
+            cdp_us: trace.cdp_us(),
+            cdp_span_us: trace.cdp_span_us(),
+            ..StepTiming::default()
+        })
+        .filter(|timing| !timing.is_empty());
+    (timing, trace)
+}
+
+fn terminal_error_with_observed_data(
+    mut desired: RpcError,
+    observed: Option<ResponseBody>,
+) -> ResponseBody {
+    desired.data = observed.and_then(|body| match body {
+        ResponseBody::Ok(value) => Some(value),
+        ResponseBody::Err(error) => error.data,
+    });
+    ResponseBody::Err(desired)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_step_metric(
+    parent_timing: &TimingTrace,
+    flow_name: &str,
+    step_index: usize,
+    method: &str,
+    session_id: &str,
+    outcome: &str,
+    local_us: u64,
+    trace: Option<TimingTrace>,
+) {
+    let now = epoch_us();
+    let mut trace = match trace {
+        Some(trace) => trace,
+        None => TimingTrace {
+            agent_received_at: now.checked_sub(local_us),
+            local_us: Some(local_us),
+            serve_replied_at: Some(now),
+            ..TimingTrace::default()
+        },
+    };
+    trace.run_id = parent_timing.run_id.clone();
+    trace.flow_name = Some(flow_name.into());
+    trace.flow_step_index = Some(step_index);
+    trace.skip_metric = false;
+    let record = MetricRecord {
+        recorded_at: now,
+        run_id: trace.run_id.clone(),
+        flow_name: trace.flow_name.clone(),
+        step_index: trace.flow_step_index,
+        method: method.into(),
+        outcome: outcome.into(),
+        session_id: Some(session_id.into()),
+        timing: trace,
+    };
+    if let Err(error) = append_metric(&record) {
+        debug!(?error, "failed to persist local Flow step metric");
+    }
 }
 
 #[cfg(test)]
@@ -470,34 +635,46 @@ mod tests {
                 "extension_received_at": 200,
                 "cdp_started_at": 210,
                 "cdp_finished_at": 350,
-                "extension_replied_at": 380
+                "extension_replied_at": 380,
+                "extension_response_sent_at": 390,
+                "serve_extension_received_at": 400,
+                "cdp_us": 90
             }
         });
         let timing = take_trace(&mut output).map(|trace| StepTiming {
             queue_us: trace.queue_wait_us(),
             websocket_us: trace.websocket_us(),
+            websocket_roundtrip_us: trace.websocket_roundtrip_us(),
             extension_us: trace.extension_dispatch_us(),
+            extension_non_cdp_us: trace.extension_non_cdp_us(),
             cdp_us: trace.cdp_us(),
+            cdp_span_us: trace.cdp_span_us(),
+            ..StepTiming::default()
         });
         let timing = timing.expect("timing should be present");
         assert_eq!(timing.queue_us, Some(50));
-        assert_eq!(timing.websocket_us, Some(40));
+        assert_eq!(timing.websocket_us, Some(50));
+        assert_eq!(timing.websocket_roundtrip_us, Some(240));
         assert_eq!(timing.extension_us, Some(180));
-        assert_eq!(timing.cdp_us, Some(140));
+        assert_eq!(timing.extension_non_cdp_us, Some(90));
+        assert_eq!(timing.cdp_us, Some(90));
+        assert_eq!(timing.cdp_span_us, Some(140));
         // The embedded trace is removed from output.
         assert!(output.get("__tabstride_timing").is_none());
         assert_eq!(output["tab_id"], 9);
     }
 
     #[test]
-    fn step_without_timing_produces_none() {
+    fn step_without_transport_trace_preserves_observed_duration() {
         let mut output = serde_json::json!({"tab_id": 3});
-        let timing = take_trace(&mut output).map(|trace| StepTiming {
-            queue_us: trace.queue_wait_us(),
-            websocket_us: trace.websocket_us(),
-            extension_us: trace.extension_dispatch_us(),
-            cdp_us: trace.cdp_us(),
-        });
-        assert!(timing.is_none());
+        let (timing, trace) = take_step_timing(&mut output, false, 17);
+        assert_eq!(
+            timing,
+            Some(StepTiming {
+                local_us: Some(17),
+                ..StepTiming::default()
+            })
+        );
+        assert!(trace.is_none());
     }
 }

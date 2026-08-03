@@ -14,7 +14,7 @@ use clap::{Args, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use tabstride_protocol::system::{BrowserStatusEntry, SessionStatusEntry};
 use tabstride_protocol::tools::{ReturnFailure, SessionMode};
-use tabstride_protocol::{ErrorCode, Method};
+use tabstride_protocol::{ErrorCode, Method, RpcError};
 
 use crate::cli::ensure_daemon::ensure_daemon;
 use crate::cli::error::{self, CliError, Format, RenderExtras};
@@ -131,6 +131,10 @@ struct StartReply {
     snapshot_ref_count: u32,
     #[serde(default)]
     snapshot_truncated: bool,
+    #[serde(default)]
+    snapshot_available: Option<bool>,
+    #[serde(default)]
+    snapshot_error: Option<RpcError>,
 }
 
 #[derive(Debug, Serialize)]
@@ -205,29 +209,7 @@ fn run_start(sock: PathBuf, args: SessionStartArgs, format: Format) -> Result<()
             }
             match format {
                 Format::Json => {
-                    let mut obj = serde_json::json!({
-                        "session_id": reply.session_id,
-                        "browser_instance_id": reply.browser_instance_id,
-                        "agent_window_id": reply.agent_window_id,
-                        "attached_tab_id": reply.attached_tab_id,
-                        "mode": mode,
-                    });
-                    if args.snapshot {
-                        if let Some(ref url) = reply.url {
-                            obj["url"] = serde_json::json!(url);
-                        }
-                        if let Some(ref title) = reply.title {
-                            obj["title"] = serde_json::json!(title);
-                        }
-                        if let Some(dv) = reply.document_version {
-                            obj["document_version"] = serde_json::json!(dv);
-                        }
-                        if let Some(ref text) = reply.snapshot_text {
-                            obj["snapshot_text"] = serde_json::json!(text);
-                        }
-                        obj["snapshot_ref_count"] = serde_json::json!(reply.snapshot_ref_count);
-                        obj["snapshot_truncated"] = serde_json::json!(reply.snapshot_truncated);
-                    }
+                    let obj = start_json(&reply, mode, args.snapshot);
                     println!(
                         "{}",
                         serde_json::to_string_pretty(&obj)
@@ -235,24 +217,103 @@ fn run_start(sock: PathBuf, args: SessionStartArgs, format: Format) -> Result<()
                     );
                 }
                 Format::Human => {
-                    println!("{}", reply.session_id);
-                    if args.snapshot {
-                        if let Some(ref url) = reply.url {
-                            println!("  url: {url}");
-                        }
-                        if let Some(ref title) = reply.title {
-                            println!("  title: {title}");
-                        }
-                        if reply.snapshot_text.is_some() {
-                            println!("  snapshot: {} refs", reply.snapshot_ref_count);
-                        }
-                    }
+                    print!("{}", render_start_human(&reply, args.snapshot));
                 }
             }
         }
         Err(err) => return Err(handle_start_error(err, format)),
     }
     Ok(())
+}
+
+fn start_json(
+    reply: &StartReply,
+    mode: SessionMode,
+    snapshot_requested: bool,
+) -> serde_json::Value {
+    let mut obj = serde_json::json!({
+        "session_id": reply.session_id,
+        "browser_instance_id": reply.browser_instance_id,
+        "agent_window_id": reply.agent_window_id,
+        "attached_tab_id": reply.attached_tab_id,
+        "mode": mode,
+    });
+    if !snapshot_requested {
+        return obj;
+    }
+    obj["snapshot_requested"] = serde_json::json!(true);
+    obj["snapshot_available"] = serde_json::json!(snapshot_is_available(reply));
+    if let Some(url) = &reply.url {
+        obj["url"] = serde_json::json!(url);
+    }
+    if let Some(title) = &reply.title {
+        obj["title"] = serde_json::json!(title);
+    }
+    if let Some(document_version) = reply.document_version {
+        obj["document_version"] = serde_json::json!(document_version);
+    }
+    if let Some(text) = &reply.snapshot_text {
+        obj["snapshot_text"] = serde_json::json!(text);
+    }
+    obj["snapshot_ref_count"] = serde_json::json!(reply.snapshot_ref_count);
+    obj["snapshot_truncated"] = serde_json::json!(reply.snapshot_truncated);
+    if let Some(error) = snapshot_failure(reply) {
+        obj["snapshot_error"] =
+            serde_json::to_value(error).expect("serializing a protocol RpcError should not fail");
+    }
+    obj
+}
+
+fn snapshot_is_available(reply: &StartReply) -> bool {
+    reply
+        .snapshot_available
+        .unwrap_or_else(|| reply.snapshot_text.is_some())
+}
+
+fn snapshot_failure(reply: &StartReply) -> Option<RpcError> {
+    if snapshot_is_available(reply) {
+        return None;
+    }
+    Some(reply.snapshot_error.clone().unwrap_or_else(|| RpcError {
+        code: ErrorCode::Unsupported,
+        message:
+            "the running service or extension did not return the requested initial snapshot".into(),
+        data: None,
+    }))
+}
+
+fn render_start_human(reply: &StartReply, snapshot_requested: bool) -> String {
+    let mut out = format!("{}\n", reply.session_id);
+    if !snapshot_requested {
+        return out;
+    }
+    if let Some(url) = &reply.url {
+        out.push_str(&format!("  url: {url}\n"));
+    }
+    if let Some(title) = &reply.title {
+        out.push_str(&format!("  title: {title}\n"));
+    }
+    if snapshot_is_available(reply) {
+        out.push_str("  snapshot:\n");
+        if let Some(text) = &reply.snapshot_text {
+            out.push_str(text);
+            if !text.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+    } else if let Some(error) = snapshot_failure(reply) {
+        out.push_str("  snapshot: unavailable\n");
+        out.push_str(&format!(
+            "  snapshot error: {}: {}\n",
+            error.code.as_str(),
+            error.message
+        ));
+        out.push_str(&format!(
+            "  hint: retry with `tabstride snapshot --session {}`\n",
+            reply.session_id
+        ));
+    }
+    out
 }
 
 fn start_reply_matches_mode(mode: SessionMode, reply: &StartReply) -> bool {
@@ -585,6 +646,47 @@ mod i3_tests {
         };
         assert!(start_reply_matches_mode(SessionMode::Attach, &attached));
         assert!(!start_reply_matches_mode(SessionMode::Isolated, &attached));
+    }
+
+    #[test]
+    fn merged_snapshot_human_output_contains_the_complete_tree() {
+        let reply = StartReply {
+            session_id: "abcd".into(),
+            browser_instance_id: "browser".into(),
+            attached_tab_id: Some(77),
+            url: Some("https://example.com".into()),
+            title: Some("Example".into()),
+            snapshot_text: Some(
+                "RootWebArea \"Example\"\n  @e1 textbox \"Email\"\n  @e2 button \"Save\"".into(),
+            ),
+            snapshot_available: Some(true),
+            snapshot_ref_count: 2,
+            ..Default::default()
+        };
+
+        let rendered = render_start_human(&reply, true);
+        assert!(rendered.contains("@e1 textbox \"Email\""));
+        assert!(rendered.contains("@e2 button \"Save\""));
+        assert!(!rendered.contains("snapshot: 2 refs"));
+    }
+
+    #[test]
+    fn old_extension_snapshot_gap_is_explicit_in_human_and_json_output() {
+        let reply = StartReply {
+            session_id: "abcd".into(),
+            browser_instance_id: "browser".into(),
+            attached_tab_id: Some(77),
+            ..Default::default()
+        };
+
+        let rendered = render_start_human(&reply, true);
+        assert!(rendered.contains("snapshot: unavailable"));
+        assert!(rendered.contains("tabstride snapshot --session abcd"));
+
+        let json = start_json(&reply, SessionMode::Attach, true);
+        assert_eq!(json["snapshot_requested"], true);
+        assert_eq!(json["snapshot_available"], false);
+        assert_eq!(json["snapshot_error"]["code"], "unsupported");
     }
 
     /// Review I3 contract: the centralised `summary:` and `hint:` lines

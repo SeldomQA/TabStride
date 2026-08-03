@@ -31,10 +31,11 @@ tabstride metrics export --out metrics.json
 Use one stable id across the commands that make up a user task:
 
 ```bash
-tabstride session start --mode attach --tab active --run-id task-001
+tabstride session start --mode attach --tab active --snapshot --run-id task-001
 tabstride flow run task.yaml --session abcd --run-id task-001
 tabstride session stop abcd --run-id task-001
 tabstride metrics summary --run-id task-001
+tabstride metrics summary --flow checkout --step-index 2
 ```
 
 Task-correlated metrics include CDP and full accessibility-tree call counts
@@ -49,6 +50,10 @@ protocol as newline-delimited JSON over stdin/stdout while reusing one authentic
 connection to `tabstride serve`. Run `tabstride client --help` for its request timeout and
 transport options.
 
+Choose the path before execution: known steps use one attach + `flow.run` + stop sequence;
+adaptive work keeps one `tabstride client` connection from attach through stop. Do not use
+`status`, `doctor`, or `browsers` as a normal readiness preflight.
+
 Batch a known sequence into one service request with Flow:
 
 ```bash
@@ -56,9 +61,14 @@ tabstride flow validate examples/flows/todomvc.yaml
 tabstride flow run examples/flows/todomvc.yaml --session abcd --var task="write code"
 ```
 
-Flow v1 runs `navigate`, `click`, `fill`, `press`, `assert`, `snapshot`, and `wait_ms` through the existing
-session queue. It stops at the first failure, reports per-step timings, and propagates timeout and
-cancel to the active child operation. Interaction targets share the same strict Locator in CLI and
+Flow v1 runs `navigate`, `click`, `fill`, `press`, `select`, `wait_for`, `request_help`, `assert`,
+`snapshot`, and `wait_ms` through the existing session queue. It stops at the first failure and
+reports timing for every started step, including the failed, timed-out, or cancelled step.
+Daemon-local `wait_ms` reports `local_us` only; it also preserves daemon-observed duration when
+cancellation wins before extension Timing returns. `websocket_us` is transport without extension
+execution; `websocket_roundtrip_us` includes it. `extension_us` includes CDP,
+`extension_non_cdp_us` excludes accumulated CDP calls, `cdp_us` is the sum of calls, and
+`cdp_span_us` is the first-to-last CDP span. Interaction targets share the same strict Locator in CLI and
 Flow: exactly one of `ref`, `css`, `role` + `name`, `label`, `placeholder`, `text`, or `testId`,
 with optional `exact` for semantic matching. Zero matches enter Auto Wait and eventually return a
 structured `timeout` if still absent; multiple matches return `ambiguous_target` immediately.
@@ -68,10 +78,17 @@ for visible/stable/enabled/unobscured state, fill requires editable, select requ
 native `<select>`, and targeted press requires focusable. Actionability failures expose
 `reason`, `failed_check`, `elapsed_ms`, and `last_state` in JSON errors.
 
+Interactions accept `--page-update none|signal|delta` (default `signal`). Signal reports the
+changed/unchanged/unknown state without AX work; none skips post-action observation; delta returns
+an incremental Snapshot only when an exact cached baseline exists. Flow action steps use the same
+`page_update` field. Handle `full_required`, `delta_unavailable`, or an absent Delta from an old
+extension by requesting a normal Snapshot. `document_change_known=false` is unknown, not unchanged,
+and also requires a normal Snapshot.
+
 Examples:
 
 ```bash
-tabstride click --role button --name Save --exact --session abcd
+tabstride click --role button --name Save --exact --session abcd --page-update delta
 tabstride fill --label Email --value agent@example.com --session abcd
 tabstride press Enter --placeholder "Add a task" --session abcd
 tabstride select --test-id country --value SG --session abcd
@@ -89,3 +106,4 @@ recent Console errors, and Locator/wait/CDP timings. Evidence collection is best
 replaces the original error.
 
 Documentation: [../../README.md](../../README.md) · [../../docs/architecture.md](../../docs/architecture.md)
+· [0.2.0 release notes](../../docs/release-notes-0.2.0.md)

@@ -261,6 +261,10 @@ export class ToolDispatcher {
     }
     let sent = true;
     try {
+      if (timing) {
+        timing.extension_response_sent_at = epochMicroseconds();
+        attachTiming(body, timing);
+      }
       this.transport.send(body);
     } catch (sendErr) {
       sent = false;
@@ -525,7 +529,27 @@ function epochMicroseconds(): number {
   return Date.now() * 1000;
 }
 
-function timedCdp<T extends CdpRunner>(cdp: T, timing: TimingTrace): T {
+export interface TimingClock {
+  epochUs(): number;
+  monotonicUs(): number;
+}
+
+const defaultTimingClock: TimingClock = {
+  epochUs: epochMicroseconds,
+  monotonicUs: () => {
+    if (typeof performance !== "undefined" && typeof performance.now === "function") {
+      return performance.now() * 1000;
+    }
+    return Date.now() * 1000;
+  },
+};
+
+/** Wrap every CDP command independently so idle/wait time is not charged to CDP. */
+export function timedCdp<T extends CdpRunner>(
+  cdp: T,
+  timing: TimingTrace,
+  clock: TimingClock = defaultTimingClock,
+): T {
   timing.counters ??= {};
   return new Proxy(cdp, {
     get(target, property, receiver) {
@@ -536,11 +560,23 @@ function timedCdp<T extends CdpRunner>(cdp: T, timing: TimingTrace): T {
           if (args[1] === "Accessibility.getFullAXTree") {
             timing.counters!.full_ax_tree_calls = (timing.counters!.full_ax_tree_calls ?? 0) + 1;
           }
-          timing.cdp_started_at ??= epochMicroseconds();
+          const epochStartedAt = clock.epochUs();
+          const monotonicStartedAt = clock.monotonicUs();
+          timing.cdp_started_at ??= epochStartedAt;
           try {
             return await target.send(...args);
           } finally {
-            timing.cdp_finished_at = epochMicroseconds();
+            const monotonicFinishedAt = clock.monotonicUs();
+            const epochFinishedAt = clock.epochUs();
+            timing.cdp_finished_at = Math.max(
+              timing.cdp_finished_at ?? epochFinishedAt,
+              epochFinishedAt,
+            );
+            const elapsedUs = monotonicFinishedAt - monotonicStartedAt;
+            if (Number.isFinite(elapsedUs) && elapsedUs >= 0) {
+              const accumulated = (timing.cdp_us ?? 0) + Math.round(elapsedUs);
+              if (Number.isSafeInteger(accumulated)) timing.cdp_us = accumulated;
+            }
           }
         };
       }

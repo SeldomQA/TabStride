@@ -63,6 +63,9 @@ export interface RequestFrame {
 
 export interface TimingTrace {
   run_id?: string;
+  flow_name?: string;
+  flow_step_index?: number;
+  skip_metric?: boolean;
   agent_received_at?: number;
   serve_queue_entered_at?: number;
   serve_queue_started_at?: number;
@@ -71,6 +74,10 @@ export interface TimingTrace {
   cdp_started_at?: number;
   cdp_finished_at?: number;
   extension_replied_at?: number;
+  extension_response_sent_at?: number;
+  serve_extension_received_at?: number;
+  /** Sum of individual CDP command durations, excluding gaps between calls. */
+  cdp_us?: number;
   serve_replied_at?: number;
   counters?: RuntimeCounters;
 }
@@ -439,6 +446,19 @@ export type ReloadResult = NavigateHistoryResult;
 
 export type MouseButton = "left" | "middle" | "right";
 export type KeyModifier = "alt" | "ctrl" | "meta" | "shift";
+export type PageUpdateMode = "none" | "signal" | "delta";
+export type SnapshotDeltaStatus = "available" | "unchanged" | "full_required" | "delta_unavailable";
+
+export interface InteractionSnapshotDelta {
+  status: SnapshotDeltaStatus;
+  text?: string;
+  base_document_version?: number;
+  document_version?: number;
+  removed_refs?: string[];
+  ref_count?: number;
+  truncated?: boolean;
+  reason?: string;
+}
 
 export interface Locator {
   ref?: string;
@@ -460,6 +480,7 @@ export interface ClickParams {
   click_count?: number;
   modifiers?: KeyModifier[];
   timeout_ms?: number;
+  page_update?: PageUpdateMode;
 }
 
 export interface ClickResult {
@@ -472,8 +493,11 @@ export interface ClickResult {
   dialogs?: JavaScriptDialogInfo[];
   /** Whether the page DOM changed as a result of this interaction. */
   document_changed?: boolean;
+  /** False means the change state is unknown (for example CDP instrumentation was unavailable). */
+  document_change_known?: boolean;
   /** CDP document version after the interaction. */
   document_version?: number;
+  snapshot_delta?: InteractionSnapshotDelta;
 }
 
 export interface FillParams {
@@ -483,6 +507,7 @@ export interface FillParams {
   tab_id?: number;
   clear_before?: boolean;
   timeout_ms?: number;
+  page_update?: PageUpdateMode;
 }
 
 export interface FillResult {
@@ -494,8 +519,11 @@ export interface FillResult {
   dialogs?: JavaScriptDialogInfo[];
   /** Whether the page DOM changed as a result of this interaction. */
   document_changed?: boolean;
+  /** False means the change state is unknown. */
+  document_change_known?: boolean;
   /** CDP document version after the interaction. */
   document_version?: number;
+  snapshot_delta?: InteractionSnapshotDelta;
 }
 
 export interface PressParams {
@@ -506,6 +534,7 @@ export interface PressParams {
   tab_id?: number;
   hold_ms?: number;
   timeout_ms?: number;
+  page_update?: PageUpdateMode;
 }
 
 export interface PressResult {
@@ -517,8 +546,11 @@ export interface PressResult {
   dialogs?: JavaScriptDialogInfo[];
   /** Whether the page DOM changed as a result of this interaction. */
   document_changed?: boolean;
+  /** False means the change state is unknown. */
+  document_change_known?: boolean;
   /** CDP document version after the interaction. */
   document_version?: number;
+  snapshot_delta?: InteractionSnapshotDelta;
 }
 
 export interface SelectParams {
@@ -527,6 +559,7 @@ export interface SelectParams {
   target?: Locator;
   tab_id?: number;
   timeout_ms?: number;
+  page_update?: PageUpdateMode;
 }
 
 export interface SelectResult {
@@ -540,8 +573,11 @@ export interface SelectResult {
   dialogs?: JavaScriptDialogInfo[];
   /** Whether the page DOM changed as a result of this interaction. */
   document_changed?: boolean;
+  /** False means the change state is unknown. */
+  document_change_known?: boolean;
   /** CDP document version after the interaction. */
   document_version?: number;
+  snapshot_delta?: InteractionSnapshotDelta;
 }
 
 export interface AssertionSpec {

@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ErrorCode;
+use crate::{ErrorCode, RpcError};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -64,6 +64,13 @@ pub struct SessionStartResult {
     /// Whether the initial snapshot was truncated by depth/token caps.
     #[serde(default)]
     pub snapshot_truncated: bool,
+    /// Explicit availability from extensions that implement merged Snapshot
+    /// status. `None` keeps older extension payloads wire-compatible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_available: Option<bool>,
+    /// Structured reason why the requested Snapshot could not be captured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_error: Option<RpcError>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -125,6 +132,8 @@ mod tests {
             snapshot_text: None,
             snapshot_ref_count: 0,
             snapshot_truncated: false,
+            snapshot_available: None,
+            snapshot_error: None,
         };
         assert_eq!(serde_json::to_value(result).unwrap()["attached_tab_id"], 77);
     }
@@ -151,6 +160,8 @@ mod tests {
             snapshot_text: Some("root\n  @e1 heading \"Welcome\"\n".into()),
             snapshot_ref_count: 1,
             snapshot_truncated: false,
+            snapshot_available: Some(true),
+            snapshot_error: None,
         };
         let encoded = serde_json::to_value(&result).unwrap();
         assert_eq!(encoded["url"], "https://example.com");
@@ -161,6 +172,7 @@ mod tests {
             "root\n  @e1 heading \"Welcome\"\n"
         );
         assert_eq!(encoded["snapshot_ref_count"], 1);
+        assert_eq!(encoded["snapshot_available"], true);
     }
 
     #[test]
@@ -170,6 +182,27 @@ mod tests {
         }))
         .unwrap();
         assert!(!params.snapshot);
+    }
+
+    #[test]
+    fn session_start_snapshot_failure_round_trips_as_in_band_status() {
+        let result = SessionStartResult {
+            agent_window_id: None,
+            attached_tab_id: Some(42),
+            snapshot_available: Some(false),
+            snapshot_error: Some(RpcError {
+                code: ErrorCode::CdpFailed,
+                message: "debugger detached".into(),
+                data: None,
+            }),
+            ..Default::default()
+        };
+
+        let encoded = serde_json::to_value(&result).unwrap();
+        assert_eq!(encoded["snapshot_available"], false);
+        assert_eq!(encoded["snapshot_error"]["code"], "cdp_failed");
+        let decoded: SessionStartResult = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, result);
     }
 
     #[test]

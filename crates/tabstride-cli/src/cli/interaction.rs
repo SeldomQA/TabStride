@@ -12,8 +12,9 @@ use anyhow::Context;
 use clap::{Args, ValueEnum};
 use tabstride_protocol::Method;
 use tabstride_protocol::tools::{
-    ClickParams, ClickResult, FillParams, FillResult, KeyModifier, Locator, MouseButton,
-    PressParams, PressResult, SelectParams, SelectResult,
+    ClickParams, ClickResult, FillParams, FillResult, InteractionSnapshotDelta, KeyModifier,
+    Locator, MouseButton, PageUpdateMode, PressParams, PressResult, SelectParams, SelectResult,
+    SnapshotDeltaStatus,
 };
 
 use crate::cli::dialogs::print_dialog_summaries;
@@ -34,6 +35,27 @@ impl From<CliMouseButton> for MouseButton {
             CliMouseButton::Left => MouseButton::Left,
             CliMouseButton::Middle => MouseButton::Middle,
             CliMouseButton::Right => MouseButton::Right,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub enum CliPageUpdate {
+    /// Skip document-change and Snapshot work after the action.
+    None,
+    /// Return the lightweight changed/unchanged/unknown signal.
+    #[default]
+    Signal,
+    /// Return a Snapshot delta when a compatible baseline exists.
+    Delta,
+}
+
+impl From<CliPageUpdate> for PageUpdateMode {
+    fn from(value: CliPageUpdate) -> Self {
+        match value {
+            CliPageUpdate::None => Self::None,
+            CliPageUpdate::Signal => Self::Signal,
+            CliPageUpdate::Delta => Self::Delta,
         }
     }
 }
@@ -213,6 +235,10 @@ pub struct ClickArgs {
 
     #[arg(long, default_value = "30s", value_parser = parse_timeout_ms)]
     pub timeout: u32,
+
+    /// Page state returned after the action: none, signal, or delta.
+    #[arg(long, value_enum, default_value_t = CliPageUpdate::Signal)]
+    pub page_update: CliPageUpdate,
 }
 
 pub fn dispatch_click(args: ClickArgs, format: Format) -> Result<(), CliError> {
@@ -221,6 +247,7 @@ pub fn dispatch_click(args: ClickArgs, format: Format) -> Result<(), CliError> {
         .expect("required locator must be present");
     let modifiers = parse_modifiers(&args.modifiers)
         .map_err(|e| CliError::Local(anyhow::anyhow!("--modifiers: {e}")))?;
+    let page_update = PageUpdateMode::from(args.page_update);
     let params = ClickParams {
         session_id: args.session.clone(),
         target,
@@ -233,6 +260,7 @@ pub fn dispatch_click(args: ClickArgs, format: Format) -> Result<(), CliError> {
             Some(modifiers)
         },
         timeout_ms: Some(args.timeout),
+        page_update: Some(page_update),
     };
     let reply: ClickResult = call(
         info.sock_path,
@@ -255,7 +283,13 @@ pub fn dispatch_click(args: ClickArgs, format: Format) -> Result<(), CliError> {
                 "click ok tab={} target={target} at=({}, {})",
                 reply.tab_id, reply.x, reply.y
             );
-            print_doc_change(reply.document_changed, reply.document_version);
+            print_page_update(
+                page_update,
+                reply.document_changed,
+                reply.document_change_known,
+                reply.document_version,
+                reply.snapshot_delta.as_ref(),
+            );
             print_dialog_summaries(&reply.dialogs);
         }
     }
@@ -291,12 +325,17 @@ pub struct FillArgs {
 
     #[arg(long, default_value = "30s", value_parser = parse_timeout_ms)]
     pub timeout: u32,
+
+    /// Page state returned after the action: none, signal, or delta.
+    #[arg(long, value_enum, default_value_t = CliPageUpdate::Signal)]
+    pub page_update: CliPageUpdate,
 }
 
 pub fn dispatch_fill(args: FillArgs, format: Format) -> Result<(), CliError> {
     let info = ensure_daemon().context("ensure daemon is running")?;
     let target = build_locator(args.target.clone(), &args.locator, true)?
         .expect("required locator must be present");
+    let page_update = PageUpdateMode::from(args.page_update);
     let params = FillParams {
         session_id: args.session.clone(),
         value: args.value.clone(),
@@ -304,6 +343,7 @@ pub fn dispatch_fill(args: FillArgs, format: Format) -> Result<(), CliError> {
         tab_id: args.tab_id,
         clear_before: if args.no_clear { Some(false) } else { None },
         timeout_ms: Some(args.timeout),
+        page_update: Some(page_update),
     };
     let reply: FillResult = call(
         info.sock_path,
@@ -326,7 +366,13 @@ pub fn dispatch_fill(args: FillArgs, format: Format) -> Result<(), CliError> {
                 "fill ok tab={} target={target} length={}",
                 reply.tab_id, reply.value_length
             );
-            print_doc_change(reply.document_changed, reply.document_version);
+            print_page_update(
+                page_update,
+                reply.document_changed,
+                reply.document_change_known,
+                reply.document_version,
+                reply.snapshot_delta.as_ref(),
+            );
             print_dialog_summaries(&reply.dialogs);
         }
     }
@@ -362,6 +408,10 @@ pub struct PressArgs {
 
     #[arg(long, default_value = "30s", value_parser = parse_timeout_ms)]
     pub timeout: u32,
+
+    /// Page state returned after the action: none, signal, or delta.
+    #[arg(long, value_enum, default_value_t = CliPageUpdate::Signal)]
+    pub page_update: CliPageUpdate,
 }
 
 pub fn dispatch_press(args: PressArgs, format: Format) -> Result<(), CliError> {
@@ -369,6 +419,7 @@ pub fn dispatch_press(args: PressArgs, format: Format) -> Result<(), CliError> {
     let modifiers = parse_modifiers(&args.modifiers)
         .map_err(|e| CliError::Local(anyhow::anyhow!("--modifiers: {e}")))?;
     let target = build_locator(None, &args.locator, false)?;
+    let page_update = PageUpdateMode::from(args.page_update);
     let params = PressParams {
         session_id: args.session.clone(),
         key: args.key.clone(),
@@ -381,6 +432,7 @@ pub fn dispatch_press(args: PressArgs, format: Format) -> Result<(), CliError> {
         tab_id: args.tab_id,
         hold_ms: args.hold_ms,
         timeout_ms: Some(args.timeout),
+        page_update: Some(page_update),
     };
     let reply: PressResult = call(
         info.sock_path,
@@ -415,7 +467,13 @@ pub fn dispatch_press(args: PressArgs, format: Format) -> Result<(), CliError> {
                 "press ok tab={} key={} code={}{mods}",
                 reply.tab_id, reply.key, reply.code
             );
-            print_doc_change(reply.document_changed, reply.document_version);
+            print_page_update(
+                page_update,
+                reply.document_changed,
+                reply.document_change_known,
+                reply.document_version,
+                reply.snapshot_delta.as_ref(),
+            );
             print_dialog_summaries(&reply.dialogs);
         }
     }
@@ -447,18 +505,24 @@ pub struct SelectArgs {
 
     #[arg(long, default_value = "30s", value_parser = parse_timeout_ms)]
     pub timeout: u32,
+
+    /// Page state returned after the action: none, signal, or delta.
+    #[arg(long, value_enum, default_value_t = CliPageUpdate::Signal)]
+    pub page_update: CliPageUpdate,
 }
 
 pub fn dispatch_select(args: SelectArgs, format: Format) -> Result<(), CliError> {
     let info = ensure_daemon().context("ensure daemon is running")?;
     let target = build_locator(args.target.clone(), &args.locator, true)?
         .expect("required locator must be present");
+    let page_update = PageUpdateMode::from(args.page_update);
     let params = SelectParams {
         session_id: args.session.clone(),
         values: args.values.clone(),
         target,
         tab_id: args.tab_id,
         timeout_ms: Some(args.timeout),
+        page_update: Some(page_update),
     };
     let reply: SelectResult = call(
         info.sock_path,
@@ -483,20 +547,98 @@ pub fn dispatch_select(args: SelectArgs, format: Format) -> Result<(), CliError>
                 "select ok tab={} target={target} multiple={} values=[{values}] labels=[{labels}]",
                 reply.tab_id, reply.multiple
             );
-            print_doc_change(reply.document_changed, reply.document_version);
+            print_page_update(
+                page_update,
+                reply.document_changed,
+                reply.document_change_known,
+                reply.document_version,
+                reply.snapshot_delta.as_ref(),
+            );
             print_dialog_summaries(&reply.dialogs);
         }
     }
     Ok(())
 }
 
-/// Print lightweight page-change signal in human output.
-fn print_doc_change(changed: bool, version: Option<u64>) {
-    if changed {
-        match version {
-            Some(v) => println!("  doc_changed=true doc_version={v}"),
-            None => println!("  doc_changed=true"),
+/// Print the requested page-update result in human output.
+fn print_page_update(
+    requested: PageUpdateMode,
+    changed: bool,
+    known: bool,
+    version: Option<u64>,
+    delta: Option<&InteractionSnapshotDelta>,
+) {
+    for line in page_update_lines(requested, changed, known, version, delta) {
+        println!("{line}");
+    }
+}
+
+fn page_update_lines(
+    requested: PageUpdateMode,
+    changed: bool,
+    known: bool,
+    version: Option<u64>,
+    delta: Option<&InteractionSnapshotDelta>,
+) -> Vec<String> {
+    if requested == PageUpdateMode::None {
+        return vec!["  page_update=none".into()];
+    }
+
+    let state = if known {
+        if changed { "true" } else { "false" }
+    } else {
+        "unknown"
+    };
+    let mut fields = vec![format!("doc_changed={state}")];
+    if let Some(version) = version {
+        fields.push(format!("doc_version={version}"));
+    }
+
+    if requested == PageUpdateMode::Delta {
+        match delta {
+            Some(delta) => {
+                fields.push(format!(
+                    "snapshot_delta={}",
+                    snapshot_delta_status_label(delta.status)
+                ));
+                if let Some(version) = delta.base_document_version {
+                    fields.push(format!("base_version={version}"));
+                }
+                if let Some(ref_count) = delta.ref_count {
+                    fields.push(format!("refs={ref_count}"));
+                }
+                if !delta.removed_refs.is_empty() {
+                    fields.push(format!("removed_refs=[{}]", delta.removed_refs.join(",")));
+                }
+                if delta.truncated == Some(true) {
+                    fields.push("truncated=true".into());
+                }
+                if let Some(reason) = &delta.reason {
+                    fields.push(format!("reason={reason:?}"));
+                }
+            }
+            None => {
+                fields.push("snapshot_delta=delta_unavailable".into());
+                fields.push("reason=\"extension did not return Snapshot Delta\"".into());
+            }
         }
+    }
+
+    let mut lines = vec![format!("  {}", fields.join(" "))];
+    if let Some(text) = delta.and_then(|delta| delta.text.as_deref())
+        && !text.is_empty()
+    {
+        lines.push(text.to_string());
+    }
+    lines
+}
+
+fn snapshot_delta_status_label(status: SnapshotDeltaStatus) -> &'static str {
+    match status {
+        SnapshotDeltaStatus::Available => "available",
+        SnapshotDeltaStatus::Unchanged => "unchanged",
+        SnapshotDeltaStatus::FullRequired => "full_required",
+        SnapshotDeltaStatus::DeltaUnavailable => "delta_unavailable",
     }
 }
 
@@ -644,6 +786,69 @@ mod tests {
         assert_eq!(
             interaction_ipc_timeout(60_000),
             Duration::from_secs(60) + Duration::from_secs(15)
+        );
+    }
+
+    #[test]
+    fn page_update_human_lines_distinguish_every_state() {
+        assert_eq!(
+            page_update_lines(PageUpdateMode::None, false, false, None, None),
+            ["  page_update=none"]
+        );
+        assert_eq!(
+            page_update_lines(PageUpdateMode::Signal, false, false, None, None),
+            ["  doc_changed=unknown"]
+        );
+        assert_eq!(
+            page_update_lines(PageUpdateMode::Signal, true, true, Some(8), None),
+            ["  doc_changed=true doc_version=8"]
+        );
+
+        let available = InteractionSnapshotDelta {
+            status: SnapshotDeltaStatus::Available,
+            text: Some("@e2 button \"Saved\"".into()),
+            base_document_version: Some(7),
+            document_version: Some(8),
+            removed_refs: vec!["e3".into()],
+            ref_count: Some(2),
+            truncated: Some(true),
+            reason: None,
+        };
+        assert_eq!(
+            page_update_lines(PageUpdateMode::Delta, true, true, Some(8), Some(&available),),
+            [
+                "  doc_changed=true doc_version=8 snapshot_delta=available base_version=7 refs=2 removed_refs=[e3] truncated=true",
+                "@e2 button \"Saved\"",
+            ]
+        );
+
+        let full_required = InteractionSnapshotDelta {
+            status: SnapshotDeltaStatus::FullRequired,
+            text: None,
+            base_document_version: None,
+            document_version: Some(8),
+            removed_refs: vec![],
+            ref_count: None,
+            truncated: None,
+            reason: Some("navigation invalidated the baseline".into()),
+        };
+        assert_eq!(
+            page_update_lines(
+                PageUpdateMode::Delta,
+                true,
+                true,
+                Some(8),
+                Some(&full_required),
+            ),
+            [
+                "  doc_changed=true doc_version=8 snapshot_delta=full_required reason=\"navigation invalidated the baseline\""
+            ]
+        );
+        assert_eq!(
+            page_update_lines(PageUpdateMode::Delta, true, true, Some(8), None),
+            [
+                "  doc_changed=true doc_version=8 snapshot_delta=delta_unavailable reason=\"extension did not return Snapshot Delta\""
+            ]
         );
     }
 

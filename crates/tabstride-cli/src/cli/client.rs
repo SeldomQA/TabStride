@@ -294,4 +294,17 @@ mod tests {
     fn default_timeout_matches_business_rpc_budget() {
         assert_eq!(ClientArgs::default().timeout, Duration::from_secs(35));
     }
+
+    #[test]
+    fn adaptive_skill_request_examples_are_valid_protocol_frames() {
+        for line in [
+            r#"{"id":"1","method":"session.start","params":{"mode":"attach","tab":"active","snapshot":true}}"#,
+            r#"{"id":"2","method":"tool.click","params":{"session_id":"xkqm","target":{"ref":"@e3"},"page_update":"delta"}}"#,
+            r#"{"id":"3","method":"tool.snapshot","params":{"session_id":"xkqm"}}"#,
+            r#"{"id":"4","method":"session.stop","params":{"session_id":"xkqm"}}"#,
+        ] {
+            let frame: Frame = serde_json::from_str(line).expect("valid request frame");
+            assert!(matches!(frame, Frame::Request(_)));
+        }
+    }
 }

@@ -623,6 +623,116 @@ describe("handleSnapshot", () => {
     });
   });
 
+  it("returns a full Snapshot when an incremental result would replace most of the tree", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    await sm.start("aa11");
+    let version = 1;
+    let axReads = 0;
+    const send = vi.fn(async <T>(_tabId: number, method: string): Promise<T> => {
+      if (method === "Runtime.evaluate") {
+        return { result: { value: { id: "doc-1", version } } } as T;
+      }
+      if (method === "Accessibility.enable") return {} as T;
+      if (method === "Accessibility.getFullAXTree") {
+        axReads += 1;
+        return {
+          nodes: [
+            {
+              nodeId: String(axReads),
+              role: { type: "role", value: "RootWebArea" },
+              name: { type: "computedString", value: axReads === 1 ? "Before" : "After" },
+              backendDOMNodeId: axReads,
+            },
+          ],
+        } as T;
+      }
+      if (method === "DOM.getDocument") return { root: { nodeId: 1 } } as T;
+      if (method === "DOM.querySelector") return { nodeId: 0 } as T;
+      throw new Error(`unexpected CDP method ${method}`);
+    }) as CdpRunner["send"];
+    const cdp: CdpRunner = { send, runtimeCounters: {} };
+    const tabsApi = {
+      get: vi.fn(
+        async (tabId: number) => ({ id: tabId, windowId: 100, active: true }) as chrome.tabs.Tab,
+      ),
+      query: vi.fn(async () => [{ id: 4, windowId: 100, active: true } as chrome.tabs.Tab]),
+    };
+
+    const first = await handleSnapshot(sm, { session_id: "aa11" }, { cdp, tabsApi });
+    version = 2;
+    const second = await handleSnapshot(
+      sm,
+      { session_id: "aa11", incremental: true },
+      { cdp, tabsApi },
+    );
+    if ("code" in first || "code" in second) throw new Error("unexpected snapshot failure");
+
+    expect(first.snapshot_kind).toBe("full");
+    expect(second.snapshot_kind).toBe("full");
+    expect(second.text).toContain('RootWebArea "After"');
+    expect(axReads).toBe(2);
+  });
+
+  it("retries a capture when the document changes and caches only the stable snapshot", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    await sm.start("aa11");
+    let identityReads = 0;
+    let axReads = 0;
+    const oldTree: CdpAxNode[] = [
+      {
+        nodeId: "old",
+        role: { type: "role", value: "button" },
+        name: { type: "computedString", value: "Old" },
+        backendDOMNodeId: 10,
+      },
+    ];
+    const stableTree: CdpAxNode[] = [
+      {
+        nodeId: "new",
+        role: { type: "role", value: "button" },
+        name: { type: "computedString", value: "Stable" },
+        backendDOMNodeId: 20,
+      },
+    ];
+    const send = vi.fn(async <T>(_tabId: number, method: string): Promise<T> => {
+      if (method === "Runtime.evaluate") {
+        identityReads += 1;
+        return {
+          result: { value: { id: "doc-1", version: identityReads === 1 ? 1 : 2 } },
+        } as T;
+      }
+      if (method === "Accessibility.enable") return {} as T;
+      if (method === "Accessibility.getFullAXTree") {
+        axReads += 1;
+        return { nodes: axReads === 1 ? oldTree : stableTree } as T;
+      }
+      if (method === "DOM.getDocument") return { root: { nodeId: 1 } } as T;
+      if (method === "DOM.querySelector") return { nodeId: 0 } as T;
+      throw new Error(`unexpected CDP method ${method}`);
+    }) as CdpRunner["send"];
+    const cdp: CdpRunner = { send, runtimeCounters: {} };
+    const tabsApi = {
+      get: vi.fn(
+        async (tabId: number) => ({ id: tabId, windowId: 100, active: true }) as chrome.tabs.Tab,
+      ),
+      query: vi.fn(async () => [{ id: 4, windowId: 100, active: true } as chrome.tabs.Tab]),
+    };
+
+    const first = await handleSnapshot(sm, { session_id: "aa11" }, { cdp, tabsApi });
+    if ("code" in first) throw new Error(`unexpected snapshot failure: ${first.message}`);
+    expect(first.snapshot_kind).toBe("full");
+    expect(first.document_version).toBe(2);
+    expect(first.text).toContain('button "Stable"');
+    expect(first.text).not.toContain('button "Old"');
+    expect(axReads).toBe(2);
+
+    const cached = await handleSnapshot(sm, { session_id: "aa11" }, { cdp, tabsApi });
+    if ("code" in cached) throw new Error(`unexpected snapshot failure: ${cached.message}`);
+    expect(cached.snapshot_kind).toBe("cached");
+    expect(cached.text).toBe(first.text);
+    expect(axReads).toBe(2);
+  });
+
   it("excludes TabStride overlay controls from text and refs", async () => {
     const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
     const ctx = await sm.start("aa11");

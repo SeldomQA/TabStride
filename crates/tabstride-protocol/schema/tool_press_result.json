@@ -17,6 +17,11 @@
         "$ref": "#/definitions/JavaScriptDialogInfo"
       }
     },
+    "document_change_known": {
+      "description": "Whether `document_changed` is authoritative.",
+      "default": false,
+      "type": "boolean"
+    },
     "document_changed": {
       "description": "Whether the page DOM changed as a result of this interaction.",
       "default": false,
@@ -41,6 +46,16 @@
         "$ref": "#/definitions/KeyModifier"
       }
     },
+    "snapshot_delta": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/InteractionSnapshotDelta"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "tab_id": {
       "type": "integer",
       "format": "int64"
@@ -57,6 +72,65 @@
     }
   },
   "definitions": {
+    "InteractionSnapshotDelta": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "base_document_version": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "document_version": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "removed_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "$ref": "#/definitions/SnapshotDeltaStatus"
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
     "JavaScriptDialogHandledAction": {
       "description": "How the extension resolved the dialog so CDP could continue.",
       "type": "string",
@@ -195,6 +269,15 @@
         }
       },
       "additionalProperties": false
+    },
+    "SnapshotDeltaStatus": {
+      "type": "string",
+      "enum": [
+        "available",
+        "unchanged",
+        "full_required",
+        "delta_unavailable"
+      ]
     }
   }
 }

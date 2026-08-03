@@ -226,10 +226,12 @@ pub fn full_handler(status: DaemonStatus, state: Arc<DaemonState>) -> RpcHandler
                     Ok(v) => ResponseBody::Ok(v),
                     Err(e) => ResponseBody::Err(e),
                 },
-                Method::SessionStart => match handle_session_start(&state, params).await {
-                    Ok(v) => ResponseBody::Ok(v),
-                    Err(e) => ResponseBody::Err(e),
-                },
+                Method::SessionStart => {
+                    match handle_session_start(&state, params, incoming_timing.clone()).await {
+                        Ok(v) => ResponseBody::Ok(v),
+                        Err(e) => ResponseBody::Err(e),
+                    }
+                }
                 Method::SessionStop => match handle_session_stop(&state, params).await {
                     Ok(v) => ResponseBody::Ok(v),
                     Err(e) => ResponseBody::Err(e),
@@ -244,7 +246,13 @@ pub fn full_handler(status: DaemonStatus, state: Arc<DaemonState>) -> RpcHandler
                     Err(e) => ResponseBody::Err(e),
                 },
                 Method::FlowRun => {
-                    super::flow_runtime::handle_flow_run(&state, rpc_id.clone(), params).await
+                    super::flow_runtime::handle_flow_run(
+                        &state,
+                        rpc_id.clone(),
+                        params,
+                        incoming_timing.clone(),
+                    )
+                    .await
                 }
                 Method::ToolTabList
                 | Method::ToolTabCreate
@@ -359,12 +367,16 @@ fn finalize_timing(method: &str, session_id: Option<String>, body: &mut Response
     let record = MetricRecord {
         recorded_at: epoch_us(),
         run_id: trace.run_id.clone(),
+        flow_name: trace.flow_name.clone(),
+        step_index: trace.flow_step_index,
         method: method.to_string(),
         outcome: outcome.to_string(),
         session_id,
         timing: trace,
     };
-    if let Err(error) = append_metric(&record) {
+    if !record.timing.skip_metric
+        && let Err(error) = append_metric(&record)
+    {
         debug!(?error, "failed to persist request metric");
     }
 }
@@ -754,6 +766,12 @@ struct CliSessionStartResult {
     pub snapshot_ref_count: u32,
     #[serde(default)]
     pub snapshot_truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_requested: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_available: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_error: Option<RpcError>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -833,7 +851,12 @@ fn clamp_browser_wait(wait_ms: Option<u64>) -> Option<Duration> {
     ))
 }
 
-async fn handle_session_start(state: &Arc<DaemonState>, params: Value) -> Result<Value, RpcError> {
+async fn handle_session_start(
+    state: &Arc<DaemonState>,
+    params: Value,
+    timing: TimingTrace,
+) -> Result<Value, RpcError> {
+    let timing = timing.agent_received_at.is_some().then_some(timing);
     let params: CliSessionStartParams = if params.is_null() {
         CliSessionStartParams {
             browser_instance_id: None,
@@ -859,6 +882,7 @@ async fn handle_session_start(state: &Arc<DaemonState>, params: Value) -> Result
             tab: params.tab.as_deref(),
             tab_id: params.tab_id,
             snapshot: params.snapshot,
+            timing,
             connect_wait: state.config.extension_connect_wait,
             timeout: DEFAULT_RPC_TIMEOUT,
         },
@@ -866,6 +890,13 @@ async fn handle_session_start(state: &Arc<DaemonState>, params: Value) -> Result
     .await
     {
         Ok(session) => {
+            let timing = session.initial_timing.clone();
+            let (snapshot_requested, snapshot_available, snapshot_error) = initial_snapshot_status(
+                params.snapshot,
+                session.initial_snapshot_available,
+                session.initial_snapshot_text.as_deref(),
+                session.initial_snapshot_error.as_ref(),
+            );
             let result = CliSessionStartResult {
                 session_id: session.id.0.clone(),
                 browser_instance_id: session.browser_id.0.clone(),
@@ -878,11 +909,44 @@ async fn handle_session_start(state: &Arc<DaemonState>, params: Value) -> Result
                 snapshot_text: session.initial_snapshot_text,
                 snapshot_ref_count: session.initial_snapshot_ref_count,
                 snapshot_truncated: session.initial_snapshot_truncated,
+                snapshot_requested,
+                snapshot_available,
+                snapshot_error,
             };
-            Ok(serde_json::to_value(result).unwrap_or(Value::Null))
+            let mut value = serde_json::to_value(result).unwrap_or(Value::Null);
+            if let Some(timing) = timing {
+                put_trace(&mut value, &timing);
+            }
+            Ok(value)
         }
         Err(err) => Err(map_start_error(err)),
     }
+}
+
+fn initial_snapshot_status(
+    requested: bool,
+    explicit_available: Option<bool>,
+    snapshot_text: Option<&str>,
+    explicit_error: Option<&RpcError>,
+) -> (Option<bool>, Option<bool>, Option<RpcError>) {
+    if !requested {
+        return (None, None, None);
+    }
+    // A positive status without the actual text is not usable. New
+    // extensions return Some("") for a valid empty tree, while older
+    // extensions are inferred solely from presence of snapshot_text.
+    let available =
+        explicit_available.unwrap_or(snapshot_text.is_some()) && snapshot_text.is_some();
+    let error = if available {
+        None
+    } else {
+        Some(explicit_error.cloned().unwrap_or_else(|| RpcError {
+            code: ErrorCode::Unsupported,
+            message: "the connected extension did not return an initial snapshot; retry with `tabstride snapshot --session <SESSION>`".into(),
+            data: None,
+        }))
+    };
+    (Some(true), Some(available), error)
 }
 
 fn map_start_error(err: StartSessionError) -> RpcError {
@@ -1433,6 +1497,34 @@ mod tests {
     #[test]
     fn session_stop_timeout_covers_stop_round_trip() {
         assert!(DEFAULT_SESSION_STOP_TIMEOUT > DEFAULT_TOOL_TIMEOUT + DEFAULT_RPC_TIMEOUT);
+    }
+
+    #[test]
+    fn initial_snapshot_status_supports_old_and_new_extensions() {
+        assert_eq!(
+            initial_snapshot_status(false, None, None, None),
+            (None, None, None)
+        );
+
+        let old_success = initial_snapshot_status(true, None, Some("RootWebArea"), None);
+        assert_eq!(old_success, (Some(true), Some(true), None));
+
+        let old_missing = initial_snapshot_status(true, None, None, None);
+        assert_eq!(old_missing.0, Some(true));
+        assert_eq!(old_missing.1, Some(false));
+        assert_eq!(old_missing.2.unwrap().code, ErrorCode::Unsupported);
+
+        let cdp_error = RpcError {
+            code: ErrorCode::CdpFailed,
+            message: "debugger detached".into(),
+            data: None,
+        };
+        let new_failure = initial_snapshot_status(true, Some(false), None, Some(&cdp_error));
+        assert_eq!(new_failure, (Some(true), Some(false), Some(cdp_error)));
+
+        let malformed_success = initial_snapshot_status(true, Some(true), None, None);
+        assert_eq!(malformed_success.1, Some(false));
+        assert_eq!(malformed_success.2.unwrap().code, ErrorCode::Unsupported);
     }
 
     #[test]

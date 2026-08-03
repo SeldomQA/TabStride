@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SessionManager } from "@/session-manager/manager";
-import type { CdpAxNode, CdpRunner } from "../observation";
+import { type CdpAxNode, type CdpRunner, handleSnapshot } from "../observation";
 import { handleSessionStart, handleSessionStop } from "../session";
 import { type AgentOverlayResetApi, type ChromeWindowsApi, type TabMutationApi } from "../tabs";
 
@@ -141,6 +141,7 @@ describe("handleSessionStart A-2 merged attach+snapshot", () => {
       url: "https://example.com/page",
       title: "Example Page",
       document_version: 3,
+      snapshot_available: true,
       snapshot_text: expect.stringContaining('@e1 heading "Welcome"'),
       snapshot_ref_count: 2,
       snapshot_truncated: false,
@@ -150,6 +151,206 @@ describe("handleSessionStart A-2 merged attach+snapshot", () => {
     const ctx = sm.get("aa11");
     expect(ctx?.refStore.isEmpty()).toBe(false);
     expect(ctx?.refStore.resolve("e1", { tabId: 77 })).not.toBeNull();
+  });
+
+  it("uses the initial snapshot as the cache baseline for the next observation", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const cdp = fakeCdp();
+    const active = {
+      id: 77,
+      windowId: 9,
+      active: true,
+      url: "https://example.com/page",
+      title: "Example Page",
+    } as chrome.tabs.Tab;
+    const tabsApi = {
+      get: vi.fn(async () => active),
+      query: vi.fn(async () => [active]),
+    };
+
+    const started = await handleSessionStart(
+      sm,
+      { session_id: "aa11", mode: "attach", tab: "active", snapshot: true },
+      {
+        windows: {
+          getLastFocused: vi.fn(async () => ({ id: 9, tabs: [active] }) as chrome.windows.Window),
+          getAll: vi.fn(async () => []),
+        },
+        tabs: tabsApi,
+        cdp,
+      },
+    );
+    expect(started).not.toHaveProperty("code");
+
+    const next = await handleSnapshot(
+      sm,
+      { session_id: "aa11", incremental: true },
+      { cdp, tabsApi },
+    );
+    if ("code" in next) throw new Error(`unexpected snapshot error: ${next.message}`);
+
+    expect(next.snapshot_kind).toBe("cached");
+    expect(next.text).toBe("");
+    expect(next.base_document_version).toBe(3);
+    expect(
+      vi.mocked(cdp.send).mock.calls.filter((call) => call[1] === "Accessibility.getFullAXTree"),
+    ).toHaveLength(1);
+  });
+
+  it("excludes TabStride overlay controls from the initial snapshot", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const active = {
+      id: 77,
+      windowId: 9,
+      active: true,
+      url: "https://example.com/page",
+      title: "Example Page",
+    } as chrome.tabs.Tab;
+    const nodes: CdpAxNode[] = [
+      {
+        nodeId: "1",
+        childIds: ["2", "3"],
+        role: { type: "role", value: "RootWebArea" },
+        name: { type: "name", value: "Example Page" },
+      },
+      {
+        nodeId: "2",
+        parentId: "1",
+        backendDOMNodeId: 11,
+        role: { type: "role", value: "button" },
+        name: { type: "name", value: "Save" },
+      },
+      {
+        nodeId: "3",
+        parentId: "1",
+        backendDOMNodeId: 902,
+        role: { type: "role", value: "button" },
+        name: { type: "name", value: "Stop agent" },
+      },
+    ];
+    const send = vi.fn(async <T>(_tabId: number, method: string): Promise<T> => {
+      if (method === "Runtime.evaluate") {
+        return { result: { value: { id: "doc-1", version: 1 } } } as T;
+      }
+      if (method === "Accessibility.enable") return {} as T;
+      if (method === "Accessibility.getFullAXTree") return { nodes } as T;
+      if (method === "DOM.getDocument") return { root: { nodeId: 1 } } as T;
+      if (method === "DOM.querySelector") return { nodeId: 9 } as T;
+      if (method === "DOM.describeNode") {
+        return {
+          node: {
+            nodeId: 9,
+            backendNodeId: 900,
+            shadowRoots: [
+              {
+                nodeId: 10,
+                backendNodeId: 901,
+                children: [{ nodeId: 11, backendNodeId: 902 }],
+              },
+            ],
+          },
+        } as T;
+      }
+      throw new Error(`unexpected CDP method ${method}`);
+    }) as CdpRunner["send"];
+    const cdp: CdpRunner = { send, runtimeCounters: {} };
+
+    const result = await handleSessionStart(
+      sm,
+      { session_id: "aa11", mode: "attach", tab: "active", snapshot: true },
+      {
+        windows: {
+          getLastFocused: vi.fn(async () => ({ id: 9, tabs: [active] }) as chrome.windows.Window),
+          getAll: vi.fn(async () => []),
+        },
+        tabs: { get: vi.fn(async () => active) },
+        cdp,
+      },
+    );
+
+    expect(result).not.toHaveProperty("code");
+    if ("code" in result) throw new Error(`unexpected session error: ${result.message}`);
+    expect(result.snapshot_text).toContain('button "Save"');
+    expect(result.snapshot_text).not.toContain("Stop agent");
+    expect(result.snapshot_ref_count).toBe(1);
+    expect(sm.get("aa11")?.refStore.resolve("e1", { tabId: 77 })).toBe(11);
+    expect(sm.get("aa11")?.refStore.resolve("e2", { tabId: 77 })).toBeNull();
+  });
+
+  it("computes an incremental snapshot against the session-start baseline", async () => {
+    const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
+    const active = {
+      id: 77,
+      windowId: 9,
+      active: true,
+      url: "https://example.com/page",
+      title: "Example Page",
+    } as chrome.tabs.Tab;
+    let version = 1;
+    let nodes = AX_TREE;
+    const send = vi.fn(async <T>(_tabId: number, method: string): Promise<T> => {
+      if (method === "Runtime.evaluate") {
+        return { result: { value: { id: "doc-1", version } } } as T;
+      }
+      if (method === "Accessibility.enable") return {} as T;
+      if (method === "Accessibility.getFullAXTree") return { nodes } as T;
+      if (method === "DOM.getDocument") return { root: { nodeId: 1 } } as T;
+      if (method === "DOM.querySelector") return { nodeId: 0 } as T;
+      throw new Error(`unexpected CDP method ${method}`);
+    }) as CdpRunner["send"];
+    const cdp: CdpRunner = { send, runtimeCounters: {} };
+    const tabsApi = {
+      get: vi.fn(async () => active),
+      query: vi.fn(async () => [active]),
+    };
+
+    const started = await handleSessionStart(
+      sm,
+      { session_id: "aa11", mode: "attach", tab: "active", snapshot: true },
+      {
+        windows: {
+          getLastFocused: vi.fn(async () => ({ id: 9, tabs: [active] }) as chrome.windows.Window),
+          getAll: vi.fn(async () => []),
+        },
+        tabs: tabsApi,
+        cdp,
+      },
+    );
+    expect(started).not.toHaveProperty("code");
+
+    version = 2;
+    nodes = [
+      {
+        nodeId: "1",
+        childIds: ["2", "3", "4"],
+        role: { type: "role", value: "RootWebArea" },
+        name: { type: "name", value: "Example Page" },
+      },
+      AX_TREE[1],
+      AX_TREE[2],
+      {
+        nodeId: "4",
+        parentId: "1",
+        backendDOMNodeId: 12,
+        role: { type: "role", value: "textbox" },
+        name: { type: "name", value: "Email" },
+      },
+    ];
+    const delta = await handleSnapshot(
+      sm,
+      { session_id: "aa11", incremental: true },
+      { cdp, tabsApi },
+    );
+    if ("code" in delta) throw new Error(`unexpected snapshot error: ${delta.message}`);
+
+    expect(delta.snapshot_kind).toBe("incremental");
+    expect(delta.base_document_version).toBe(1);
+    expect(delta.document_version).toBe(2);
+    expect(delta.text).toContain('textbox "Email"');
+    expect(delta.removed_refs).toEqual([]);
+    expect(
+      vi.mocked(cdp.send).mock.calls.filter((call) => call[1] === "Accessibility.getFullAXTree"),
+    ).toHaveLength(2);
   });
 
   it("attach without snapshot skips CDP entirely and returns only the lease", async () => {
@@ -174,7 +375,7 @@ describe("handleSessionStart A-2 merged attach+snapshot", () => {
     expect(cdp.send).not.toHaveBeenCalled();
   });
 
-  it("attach with snapshot but no CDP degrades to a lease-only reply with cdp_failed", async () => {
+  it("attach with snapshot but no CDP returns a registered session with structured failure", async () => {
     const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
     const active = { id: 77, windowId: 9, active: true } as chrome.tabs.Tab;
 
@@ -191,8 +392,12 @@ describe("handleSessionStart A-2 merged attach+snapshot", () => {
     );
 
     expect(result).toMatchObject({
-      code: "cdp_failed",
       attached_tab_id: 77,
+      snapshot_available: false,
+      snapshot_error: {
+        code: "cdp_failed",
+        message: "snapshot requested but CDP is unavailable",
+      },
     });
     expect(sm.has("aa11")).toBe(true);
   });
@@ -202,7 +407,7 @@ describe("handleSessionStart A-2 merged attach+snapshot", () => {
     const sm = new SessionManager({ agentWindow: aw });
     const cdp = fakeCdp();
     const agentTab = {
-      id: 100,
+      id: 777,
       windowId: 100,
       active: true,
       url: "about:blank",
@@ -213,7 +418,10 @@ describe("handleSessionStart A-2 merged attach+snapshot", () => {
       sm,
       { session_id: "aa11", snapshot: true },
       {
-        tabs: { get: vi.fn(async () => agentTab) },
+        tabs: {
+          get: vi.fn(async () => agentTab),
+          query: vi.fn(async () => [agentTab]),
+        },
         cdp,
       },
     );
@@ -221,9 +429,31 @@ describe("handleSessionStart A-2 merged attach+snapshot", () => {
     expect(result).toMatchObject({
       agent_window_id: 100,
       url: "about:blank",
+      snapshot_available: true,
       snapshot_ref_count: 2,
     });
+    expect(cdp.send).toHaveBeenCalledWith(777, "Accessibility.getFullAXTree", {});
     expect(aw.create).toHaveBeenCalled();
+  });
+
+  it("isolated snapshot failure remains a tracked, stoppable session", async () => {
+    const aw = fakeAgentWindow([100]);
+    const sm = new SessionManager({ agentWindow: aw });
+
+    const result = await handleSessionStart(sm, { session_id: "aa11", snapshot: true });
+
+    expect(result).toEqual({
+      agent_window_id: 100,
+      snapshot_available: false,
+      snapshot_error: {
+        code: "cdp_failed",
+        message: "snapshot requested but CDP is unavailable",
+      },
+    });
+    expect(sm.has("aa11")).toBe(true);
+    await expect(handleSessionStop(sm, { session_id: "aa11" })).resolves.toEqual({});
+    expect(sm.has("aa11")).toBe(false);
+    expect(aw.remove).toHaveBeenCalledWith(100);
   });
 
   it("snapshot capture failure is non-fatal and still returns page metadata", async () => {
@@ -256,6 +486,8 @@ describe("handleSessionStart A-2 merged attach+snapshot", () => {
       url: "https://example.com/page",
       title: "Example Page",
       document_version: 3,
+      snapshot_available: false,
+      snapshot_error: { code: "cdp_failed", message: "CDP exploded" },
     });
     // Session stays alive so the agent can retry with tool.snapshot.
     expect(sm.has("aa11")).toBe(true);

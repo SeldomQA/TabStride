@@ -7,8 +7,8 @@ use tabstride::daemon::{self, DaemonConfig};
 use tabstride::ipc_client::IpcClient;
 use tabstride::timing::TIMING_FIELD;
 use tabstride_protocol::{
-    CancelParams, CancelResult, ErrorCode, FlowDefinition, FlowRunParams, FlowRunResult, FlowStep,
-    FlowWaitMsEntry, FlowWaitMsStep, Method,
+    CancelParams, CancelResult, ErrorCode, FlowDefinition, FlowFailureData, FlowRunParams,
+    FlowRunResult, FlowStep, FlowWaitMsEntry, FlowWaitMsStep, Method,
 };
 use tokio::net::TcpListener;
 
@@ -76,6 +76,12 @@ async fn flow_runs_all_steps_in_one_rpc() {
             .iter()
             .all(|step| step.method == "tool.wait_ms")
     );
+    for step in &result.completed_steps {
+        let timing = step.timing.as_ref().expect("local timing");
+        assert!(timing.local_us.is_some());
+        assert!(timing.websocket_us.is_none());
+        assert!(timing.cdp_us.is_none());
+    }
     daemon.shutdown().await;
 }
 
@@ -120,9 +126,12 @@ async fn total_timeout_cancels_active_child_step() {
         .unwrap()
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::Timeout);
-    let data = error.data.unwrap();
-    assert_eq!(data["failed_step"], 1);
-    assert_eq!(data["failed_method"], "tool.wait_ms");
+    let data: FlowFailureData = serde_json::from_value(error.data.unwrap()).unwrap();
+    assert_eq!(data.failed_step, 1);
+    assert_eq!(data.failed_method, "tool.wait_ms");
+    let failed = data.failed_step_result.expect("started failed step");
+    assert_eq!(failed.index, 1);
+    assert!(failed.timing.unwrap().local_us.is_some());
     daemon.shutdown().await;
 }
 
@@ -159,5 +168,9 @@ async fn cancel_stops_the_whole_flow() {
     assert!(cancelled.cancelled);
     let error = task.await.unwrap().unwrap_err();
     assert_eq!(error.code, ErrorCode::Cancelled);
+    let data: FlowFailureData = serde_json::from_value(error.data.unwrap()).unwrap();
+    let failed = data.failed_step_result.expect("active cancelled step");
+    assert_eq!(failed.method, "tool.wait_ms");
+    assert!(failed.timing.unwrap().local_us.is_some());
     daemon.shutdown().await;
 }

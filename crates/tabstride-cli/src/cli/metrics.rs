@@ -25,6 +25,12 @@ pub struct MetricsFilter {
     /// Only include records associated with one task-level run id.
     #[arg(long)]
     pub run_id: Option<String>,
+    /// Only include metrics emitted by one Flow name.
+    #[arg(long)]
+    pub flow: Option<String>,
+    /// Only include one 1-based Flow step index.
+    #[arg(long)]
+    pub step_index: Option<usize>,
     /// Only include the newest N records.
     #[arg(long)]
     pub last: Option<usize>,
@@ -41,15 +47,23 @@ pub struct MetricsExportArgs {
 
 #[derive(Debug, Serialize)]
 struct SummaryRow {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    flow_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    step_index: Option<usize>,
     method: String,
     count: usize,
     p50_us: u64,
     p95_us: u64,
     p99_us: u64,
     queue_p95_us: Option<u64>,
+    local_p95_us: Option<u64>,
     websocket_p95_us: Option<u64>,
+    websocket_roundtrip_p95_us: Option<u64>,
     extension_p95_us: Option<u64>,
+    extension_non_cdp_p95_us: Option<u64>,
     cdp_p95_us: Option<u64>,
+    cdp_span_p95_us: Option<u64>,
     cdp_calls: u64,
     full_ax_tree_calls: u64,
     locator_cache_hit_rate: Option<f64>,
@@ -72,6 +86,12 @@ fn filtered(filter: &MetricsFilter) -> Result<Vec<MetricRecord>, CliError> {
     if let Some(run_id) = &filter.run_id {
         records.retain(|record| record.run_id.as_deref() == Some(run_id));
     }
+    if let Some(flow_name) = &filter.flow {
+        records.retain(|record| record.flow_name.as_deref() == Some(flow_name));
+    }
+    if let Some(step_index) = filter.step_index {
+        records.retain(|record| record.step_index == Some(step_index));
+    }
     if let Some(last) = filter.last
         && records.len() > last
     {
@@ -82,16 +102,17 @@ fn filtered(filter: &MetricsFilter) -> Result<Vec<MetricRecord>, CliError> {
 
 fn summary(filter: MetricsFilter, format: Format) -> Result<(), CliError> {
     let records = filtered(&filter)?;
-    let mut groups: BTreeMap<String, Vec<MetricRecord>> = BTreeMap::new();
+    let mut groups: BTreeMap<(Option<String>, Option<usize>, String), Vec<MetricRecord>> =
+        BTreeMap::new();
     for record in records {
         groups
-            .entry(record.method.clone())
+            .entry(metric_group_key(&record))
             .or_default()
             .push(record);
     }
     let rows: Vec<SummaryRow> = groups
         .into_iter()
-        .filter_map(|(method, records)| {
+        .filter_map(|((flow_name, step_index, method), records)| {
             let total: Vec<u64> = records
                 .iter()
                 .filter_map(|record| record.timing.total_runtime_us())
@@ -100,15 +121,25 @@ fn summary(filter: MetricsFilter, format: Format) -> Result<(), CliError> {
                 return None;
             }
             Some(SummaryRow {
+                flow_name,
+                step_index,
                 method,
                 count: total.len(),
                 p50_us: percentile(&total, 50),
                 p95_us: percentile(&total, 95),
                 p99_us: percentile(&total, 99),
                 queue_p95_us: phase_percentile(&records, |r| r.timing.queue_wait_us()),
+                local_p95_us: phase_percentile(&records, |r| r.timing.local_us),
                 websocket_p95_us: phase_percentile(&records, |r| r.timing.websocket_us()),
+                websocket_roundtrip_p95_us: phase_percentile(&records, |r| {
+                    r.timing.websocket_roundtrip_us()
+                }),
                 extension_p95_us: phase_percentile(&records, |r| r.timing.extension_dispatch_us()),
+                extension_non_cdp_p95_us: phase_percentile(&records, |r| {
+                    r.timing.extension_non_cdp_us()
+                }),
                 cdp_p95_us: phase_percentile(&records, |r| r.timing.cdp_us()),
+                cdp_span_p95_us: phase_percentile(&records, |r| r.timing.cdp_span_us()),
                 cdp_calls: records
                     .iter()
                     .map(|record| record.timing.counters.cdp_calls)
@@ -145,27 +176,41 @@ fn summary(filter: MetricsFilter, format: Format) -> Result<(), CliError> {
                 println!("No timing metrics recorded yet. Run a browser command first.");
             } else {
                 println!(
-                    "{:<28} {:>7} {:>10} {:>10} {:>10} {:>10} {:>9}",
-                    "method", "count", "p50", "p95", "p99", "cdp p95", "AX calls"
+                    "{:<20} {:>4} {:<24} {:>7} {:>10} {:>10} {:>10} {:>10} {:>10}",
+                    "flow", "step", "method", "count", "p50", "p95", "p99", "local p95", "cdp p95"
                 );
                 for row in rows {
                     println!(
-                        "{:<28} {:>7} {:>9.2}ms {:>9.2}ms {:>9.2}ms {:>9} {:>9}",
+                        "{:<20} {:>4} {:<24} {:>7} {:>9.2}ms {:>9.2}ms {:>9.2}ms {:>10} {:>10}",
+                        row.flow_name.as_deref().unwrap_or("-"),
+                        row.step_index
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "-".into()),
                         row.method,
                         row.count,
                         row.p50_us as f64 / 1000.0,
                         row.p95_us as f64 / 1000.0,
                         row.p99_us as f64 / 1000.0,
+                        row.local_p95_us
+                            .map(|v| format!("{:.2}ms", v as f64 / 1000.0))
+                            .unwrap_or_else(|| "-".into()),
                         row.cdp_p95_us
                             .map(|v| format!("{:.2}ms", v as f64 / 1000.0))
                             .unwrap_or_else(|| "-".into()),
-                        row.full_ax_tree_calls,
                     );
                 }
             }
         }
     }
     Ok(())
+}
+
+fn metric_group_key(record: &MetricRecord) -> (Option<String>, Option<usize>, String) {
+    (
+        record.flow_name.clone(),
+        record.step_index,
+        record.method.clone(),
+    )
 }
 
 fn cache_hit_rate(
@@ -208,7 +253,7 @@ fn percentile(values: &[u64], percentile: usize) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{cache_hit_rate, percentile};
+    use super::{cache_hit_rate, metric_group_key, percentile};
     use crate::timing::{MetricRecord, RuntimeCounters, TimingTrace};
 
     #[test]
@@ -241,10 +286,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn flow_name_step_index_and_method_form_the_metric_group() {
+        let mut first = metric(RuntimeCounters::default());
+        first.flow_name = Some("checkout".into());
+        first.step_index = Some(1);
+        first.method = "tool.click".into();
+        let mut second = first.clone();
+        second.step_index = Some(2);
+        let mut third = first.clone();
+        third.method = "tool.fill".into();
+
+        assert_ne!(metric_group_key(&first), metric_group_key(&second));
+        assert_ne!(metric_group_key(&first), metric_group_key(&third));
+        assert_eq!(
+            metric_group_key(&first),
+            (Some("checkout".into()), Some(1), "tool.click".into())
+        );
+    }
+
     fn metric(counters: RuntimeCounters) -> MetricRecord {
         MetricRecord {
             recorded_at: 1,
             run_id: Some("run".into()),
+            flow_name: None,
+            step_index: None,
             method: "tool.snapshot".into(),
             outcome: "ok".into(),
             session_id: None,

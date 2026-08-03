@@ -226,12 +226,21 @@ fn print_timing(
     eprintln!("  ipc_connect_us          {ipc_connect_us}");
     if let Some(trace) = trace {
         eprintln!("  queue_wait_us           {}", value(trace.queue_wait_us()));
-        eprintln!("  websocket_us            {}", value(trace.websocket_us()));
+        eprintln!("  websocket_transport_us  {}", value(trace.websocket_us()));
         eprintln!(
-            "  extension_dispatch_us   {}",
+            "  websocket_roundtrip_us  {}",
+            value(trace.websocket_roundtrip_us())
+        );
+        eprintln!(
+            "  extension_total_us      {}",
             value(trace.extension_dispatch_us())
         );
+        eprintln!(
+            "  extension_non_cdp_us    {}",
+            value(trace.extension_non_cdp_us())
+        );
         eprintln!("  cdp_us                  {}", value(trace.cdp_us()));
+        eprintln!("  cdp_span_us             {}", value(trace.cdp_span_us()));
         eprintln!(
             "  total_runtime_us        {}",
             value(trace.total_runtime_us())

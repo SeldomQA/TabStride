@@ -3,6 +3,7 @@ import type { CdpRunner } from "@/tools/shared";
 export interface DocumentIdentity {
   id: string;
   version: number;
+  url?: string;
 }
 
 export interface CachedValue<T> {
@@ -55,7 +56,7 @@ const DOCUMENT_VERSION_EXPRESSION = `(() => {
       characterData: true
     });
   }
-  return { id: state.id, version: state.version };
+  return { id: state.id, version: state.version, url: location.href };
 })()`;
 
 /**

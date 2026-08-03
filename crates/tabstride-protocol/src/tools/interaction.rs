@@ -32,6 +32,47 @@ pub enum MouseButton {
     Right,
 }
 
+/// Amount of page-state information requested after an interaction.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PageUpdateMode {
+    /// Skip document identity reads and Snapshot work.
+    None,
+    /// Return only the lightweight changed/unchanged/unknown signal.
+    #[default]
+    Signal,
+    /// Return a Snapshot delta when a compatible baseline exists.
+    Delta,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotDeltaStatus {
+    Available,
+    Unchanged,
+    FullRequired,
+    DeltaUnavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct InteractionSnapshotDelta {
+    pub status: SnapshotDeltaStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_document_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ref_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// Unified element locator used by CLI, Flow, and extension interaction tools.
 /// Exactly one primary strategy must be present. `role` additionally requires
 /// `name`; `exact` applies to semantic string strategies only.
@@ -129,6 +170,8 @@ pub struct ClickParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 1))]
     pub timeout_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_update: Option<PageUpdateMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -151,10 +194,16 @@ pub struct ClickResult {
     /// full re-snapshot when nothing moved).
     #[serde(default)]
     pub document_changed: bool,
+    /// Whether `document_changed` is authoritative. `false` means the
+    /// extension could not read a document identity before or after the action.
+    #[serde(default)]
+    pub document_change_known: bool,
     /// CDP document version after the interaction (lets the agent
     /// correlate with prior snapshot state).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub document_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_delta: Option<InteractionSnapshotDelta>,
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +224,8 @@ pub struct FillParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 1))]
     pub timeout_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_update: Option<PageUpdateMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -193,9 +244,14 @@ pub struct FillResult {
     /// Whether the page DOM changed as a result of this interaction.
     #[serde(default)]
     pub document_changed: bool,
+    /// Whether `document_changed` is authoritative.
+    #[serde(default)]
+    pub document_change_known: bool,
     /// CDP document version after the interaction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub document_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_delta: Option<InteractionSnapshotDelta>,
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +280,8 @@ pub struct PressParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 1))]
     pub timeout_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_update: Option<PageUpdateMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -240,9 +298,14 @@ pub struct PressResult {
     /// Whether the page DOM changed as a result of this interaction.
     #[serde(default)]
     pub document_changed: bool,
+    /// Whether `document_changed` is authoritative.
+    #[serde(default)]
+    pub document_change_known: bool,
     /// CDP document version after the interaction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub document_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_delta: Option<InteractionSnapshotDelta>,
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +328,8 @@ pub struct SelectParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 1))]
     pub timeout_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_update: Option<PageUpdateMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -287,9 +352,14 @@ pub struct SelectResult {
     /// Whether the page DOM changed as a result of this interaction.
     #[serde(default)]
     pub document_changed: bool,
+    /// Whether `document_changed` is authoritative.
+    #[serde(default)]
+    pub document_change_known: bool,
     /// CDP document version after the interaction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub document_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_delta: Option<InteractionSnapshotDelta>,
 }
 
 #[cfg(test)]
@@ -321,6 +391,7 @@ mod tests {
             click_count: Some(1),
             modifiers: Some(vec![KeyModifier::Ctrl]),
             timeout_ms: Some(5_000),
+            page_update: None,
         };
         let v = serde_json::to_value(&p).unwrap();
         assert_eq!(v["target"]["ref"], "@e3");
@@ -356,7 +427,9 @@ mod tests {
             used_target: None,
             dialogs: vec![],
             document_changed: false,
+            document_change_known: true,
             document_version: None,
+            snapshot_delta: None,
         };
         let v = serde_json::to_value(&r).unwrap();
         let round: PressResult = serde_json::from_value(v).unwrap();
@@ -374,13 +447,58 @@ mod tests {
             y: 200.0,
             dialogs: vec![],
             document_changed: true,
+            document_change_known: true,
             document_version: Some(7),
+            snapshot_delta: None,
         };
         let v = serde_json::to_value(&r).unwrap();
         assert_eq!(v["document_changed"], true);
+        assert_eq!(v["document_change_known"], true);
         assert_eq!(v["document_version"], 7);
         let round: ClickResult = serde_json::from_value(v).unwrap();
         assert_eq!(round, r);
+    }
+
+    #[test]
+    fn optional_snapshot_delta_round_trips() {
+        let params: ClickParams = serde_json::from_value(json!({
+            "session_id": "abcd",
+            "target": { "ref": "@e1" },
+            "page_update": "delta"
+        }))
+        .unwrap();
+        assert_eq!(params.page_update, Some(PageUpdateMode::Delta));
+
+        let result = ClickResult {
+            tab_id: 42,
+            used_target: ref_locator("@e1"),
+            used_ref: Some("@e1".into()),
+            used_selector: None,
+            x: 100.0,
+            y: 200.0,
+            dialogs: vec![],
+            document_changed: true,
+            document_change_known: true,
+            document_version: Some(8),
+            snapshot_delta: Some(InteractionSnapshotDelta {
+                status: SnapshotDeltaStatus::Available,
+                text: Some("@e2 button \"Saved\"".into()),
+                base_document_version: Some(7),
+                document_version: Some(8),
+                removed_refs: vec!["e3".into()],
+                ref_count: Some(2),
+                truncated: Some(false),
+                reason: None,
+            }),
+        };
+        let value = serde_json::to_value(&result).unwrap();
+        assert_eq!(value["snapshot_delta"]["status"], "available");
+        assert_eq!(value["snapshot_delta"]["base_document_version"], 7);
+        assert_eq!(value["snapshot_delta"]["removed_refs"], json!(["e3"]));
+        assert_eq!(
+            serde_json::from_value::<ClickResult>(value).unwrap(),
+            result
+        );
     }
 
     #[test]
@@ -394,7 +512,9 @@ mod tests {
             y: 0.0,
             dialogs: vec![],
             document_changed: false,
+            document_change_known: true,
             document_version: None,
+            snapshot_delta: None,
         };
         let v = serde_json::to_value(&r).unwrap();
         assert!(v.get("document_version").is_none());
@@ -412,7 +532,9 @@ mod tests {
         }))
         .unwrap();
         assert!(!r.document_changed);
+        assert!(!r.document_change_known);
         assert_eq!(r.document_version, None);
+        assert_eq!(r.snapshot_delta, None);
     }
 
     #[test]
@@ -427,7 +549,9 @@ mod tests {
             selected_labels: vec!["United States".into()],
             dialogs: vec![],
             document_changed: true,
+            document_change_known: true,
             document_version: Some(12),
+            snapshot_delta: None,
         };
         let v = serde_json::to_value(&r).unwrap();
         assert_eq!(v["document_changed"], true);
@@ -445,6 +569,7 @@ mod tests {
             tab_id: None,
             clear_before: None,
             timeout_ms: None,
+            page_update: None,
         };
         let v = serde_json::to_value(&p).unwrap();
         assert!(v.get("clear_before").is_none());
@@ -458,6 +583,7 @@ mod tests {
             target: ref_locator("@e3"),
             tab_id: Some(12),
             timeout_ms: Some(5_000),
+            page_update: None,
         };
         let v = serde_json::to_value(&p).unwrap();
         assert_eq!(v.get("values").cloned(), Some(json!(["us", "ca"])));
