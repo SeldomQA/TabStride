@@ -95,7 +95,7 @@ Minimize round-trips. A deterministic task on a known page completes in three se
 
 ```
 1. session start (--mode attach --tab active)   → session id
-2. flow run (all actions + assertions)          → one process, one WebSocket frame
+2. flow run (all actions + assertions)          → one process, one flow.run request
 3. session stop                                 → release
 ```
 
@@ -109,7 +109,8 @@ entirely and let the Flow resolve them at execution time.
 |-----------|--------|
 | Page structure known from prior context | No snapshot; use stable locators directly |
 | Page unknown, need refs for Flow/commands | One `--snapshot` on session start |
-| After an interaction (`click`/`fill`/…) | Check `document_changed`; re-snapshot only when `true` |
+| Deterministic intermediate interaction | Set `page_update: none`; use stable semantic locators |
+| Adaptive interaction after a Snapshot | Request `page_update: delta`; consume it or follow its fallback status |
 | After navigation to a new page | Always re-snapshot (refs are invalidated) |
 | Before an assertion on a stable element | No snapshot needed if refs are still valid |
 
@@ -118,7 +119,7 @@ entirely and let the Flow resolve them at execution time.
 - One CLI process per action for a deterministic sequence → use one Flow.
 - Snapshot after every click/fill regardless of `document_changed` → check the flag first.
 - Split a Flow to inspect intermediate logs → the Flow result already reports per-step output
-  and timing; use `--format json` if needed.
+  and timing; use the global `--json` flag if needed.
 - Run `status`/`doctor`/`browsers` before the first business command → attach directly.
 - Repeatedly query the DOM (`get-html`, `evaluate`) to locate an element → use one snapshot
   and semantic locators (`--role`, `--name`, `--label`, `--test-id`).
@@ -140,7 +141,7 @@ After session start, choose one of two execution paths:
 **Decision rule:** If the task has two or more known Flow-supported actions and later steps do
 not depend on inspecting an unknown intermediate result, use Flow. Otherwise use the persistent
 client. When only part of a task is deterministic, batch the contiguous known group into a Flow
-and run the adaptive remainder through the persistent client or individual commands.
+request through the same persistent client, then continue the adaptive remainder on that client.
 
 Do not spawn one CLI process per action for adaptive work — use the persistent client to keep
 one connection alive across multiple request/response cycles.
@@ -159,9 +160,11 @@ JSON request frame per stdin line, and writes one correlated response frame per 
 3. Read response → extract session_id, snapshot_text, document_version
 4. Loop:
    a. Send interaction request (tool.click / tool.fill / tool.press / …)
-   b. Read response → check document_changed
-      - false → refs still valid, proceed to next action
-      - true  → send tool.snapshot before the next ref-based action
+   b. Read response → check snapshot_delta
+      - available → use its text and removed_refs as the page update
+      - unchanged → keep the current page model
+      - full_required / delta_unavailable → send tool.snapshot
+      - document_change_known=false (unknown) → send tool.snapshot before deciding the next action
    c. Decide next action from the result
 5. Send session.stop request
 6. Close stdin (or kill the process) — in-flight work is cancelled
@@ -172,20 +175,22 @@ JSON request frame per stdin line, and writes one correlated response frame per 
 ```jsonl
 → {"id":"1","method":"session.start","params":{"mode":"attach","tab":"active","snapshot":true}}
 ← {"id":"1","result":{"session_id":"xkqm","url":"…","snapshot_text":"…","document_version":5,…}}
-→ {"id":"2","method":"tool.click","params":{"session_id":"xkqm","target":{"ref":"@e3"}}}
-← {"id":"2","result":{"tab_id":9,"x":120,"y":40,"document_changed":true,"document_version":6,…}}
-→ {"id":"3","method":"tool.snapshot","params":{"session_id":"xkqm"}}
-← {"id":"3","result":{"snapshot_text":"…","ref_count":42,…}}
-→ {"id":"4","method":"tool.fill","params":{"session_id":"xkqm","target":{"ref":"@e7"},"value":"hello"}}
-← {"id":"4","result":{"tab_id":9,"value_length":5,"document_changed":false,…}}
-→ {"id":"5","method":"session.stop","params":{"session_id":"xkqm"}}
-← {"id":"5","result":{}}
+→ {"id":"2","method":"tool.click","params":{"session_id":"xkqm","target":{"ref":"@e3"},"page_update":"delta"}}
+← {"id":"2","result":{"document_changed":true,"snapshot_delta":{"status":"available","text":"…","removed_refs":[]},…}}
+→ {"id":"3","method":"tool.fill","params":{"session_id":"xkqm","target":{"label":"Email"},"value":"hello","page_update":"signal"}}
+← {"id":"3","result":{"document_changed":false,"document_change_known":true,…}}
+→ {"id":"4","method":"session.stop","params":{"session_id":"xkqm"}}
+← {"id":"4","result":{}}
 ```
 
 **Rules:**
 
 - Pipeline requests only when their dependencies allow it; always preserve response IDs.
-- Use `document_changed` from interaction results to skip unnecessary snapshots.
+- Request `delta` only after a Snapshot baseline. Treat `full_required`, `delta_unavailable`, or
+  an absent `snapshot_delta` from an old extension as requiring a normal Snapshot.
+- Treat `document_change_known=false` as unknown, never as unchanged; refresh with `tool.snapshot`.
+- On `user_aborted`, send no more browser requests, do not retry, and do not create another attach
+  session. Close the client and wait for a new user request.
 - Closing the client cancels in-flight work and stops sessions it created, but still send an
   explicit `session.stop` in the normal success/error cleanup path.
 - Do not choose the persistent client over a Flow for a deterministic sequence.
@@ -203,9 +208,20 @@ tabstride flow run <flow.yaml> --session <id> --var key=value
 `session start` and `session stop` are lifecycle commands, not Flow steps. For deterministic work,
 follow exactly: start one session → validate one Flow → run it once → stop the session.
 
+A Flow is one Agent/CLI request to the daemon, not one extension WebSocket frame. The daemon still
+dispatches each browser Step through the session queue and sends one extension request per Step.
+Flow removes repeated CLI processes and Agent↔daemon decision round-trips; it does not collapse
+multiple browser actions into one browser command.
+
 Use Flow v1 for deterministic `navigate`, `click`, `fill`, `press`, `select`, `wait_for`,
 `request_help`, `assert`, `snapshot`, and `wait_ms` steps. Flow and individual commands use the
 same strict Locator, Actionability, Auto Wait, cancellation, timeout, and Evidence paths.
+
+Set `page_update: none` on predetermined intermediate actions that use stable semantic locators.
+Keep `signal` when only the changed/unchanged decision matters. Use `delta` only after a Snapshot
+step when the returned page structure is needed; consume `available`, keep state on `unchanged`,
+and run a full Snapshot on `full_required` or `delta_unavailable`. Never request Delta on every
+step merely because it exists.
 
 Prefer `wait_for` over `wait_ms` for page readiness. It re-resolves the original Locator and waits
 for `attached`, `detached`, `visible`, `hidden`, `enabled`, `disabled`, `editable`, `checked`,
@@ -216,8 +232,11 @@ Put requested end-state checks in top-level `assertions`; they run only after ev
 succeeds. Use an inline `assert` only when its result must gate a later action.
 
 Every `flow run` result includes per-step `duration_ms` and a `timing` breakdown
-(`queue_us`, `websocket_us`, `extension_us`, `cdp_us`) when available. Use `--format json` to
-inspect timing for diagnosing slow steps.
+(`queue_us`, `websocket_us`, `websocket_roundtrip_us`, `extension_us`,
+`extension_non_cdp_us`, `cdp_us`, `cdp_span_us`) when available; daemon-local steps use
+`local_us`. Cancellation that wins before extension Timing returns preserves daemon-observed time
+in `local_us` without fabricating unavailable transport phases. Use the global `--json` flag to
+inspect successful and failed Step timing.
 
 Use `request_help` inside a Flow for a captcha, login, confirmation, or another bounded human step.
 Set the Flow's total `timeout` longer than the human step's `timeout_ms`. Continue resumes the Flow;
@@ -238,6 +257,9 @@ failed step. Do not silently retry the whole Flow, skip or weaken a failed asser
 Flow with individual commands without first diagnosing why it failed. Ctrl+C cancels the active
 step and the rest of the Flow.
 
+For a Flow failure, inspect `error.data.failed_step_result` and
+`error.data.cause.data.evidence`; individual command evidence remains at `error.data.evidence`.
+
 ## Core interaction loop
 
 Write operations affect only the current session target: an Agent Window tab in isolated mode, or the single leased tab in attach mode.
@@ -250,24 +272,18 @@ tabstride session start --mode attach --tab active --snapshot
 # Traditional path: separate snapshot after session start
 tabstride navigate <url> --session <id>
 tabstride snapshot --session <id>          → aria tree with @e1, @e2, … refs
-tabstride click @e3 --session <id>          → or tabstride fill, tabstride select, tabstride press
-# → result includes document_changed (bool) + document_version (int)
-tabstride snapshot --session <id>            → only when document_changed=true or navigation occurred
+tabstride click @e3 --session <id> --page-update delta
+# → available/unchanged, or an explicit full_required/delta_unavailable fallback
+tabstride snapshot --session <id>            → only when the Delta result requires it
 ```
 
 **Refs invalidate after navigation** — always re-snapshot before clicking, filling, or selecting on a new page.
 
-**Skip redundant snapshots:** Every `click`, `fill`, `press`, and `select` result includes
-`document_changed` (boolean) and `document_version` (integer). Use this signal to avoid unnecessary
-snapshot round-trips:
-
-- `document_changed=false` → the DOM did not mutate; current `@eN` refs remain valid. Proceed to
-  the next interaction without re-snapshotting.
-- `document_changed=true` → the DOM mutated. Re-snapshot before the next ref-based interaction
-  unless you are certain the target refs are unaffected (e.g. a sibling-only change).
-
-With `--json`, the fields appear in the result object. In human output, a changed page prints
-`doc_changed=true doc_version=N` on the line below the action summary.
+**Choose page observation deliberately:** `--page-update signal` is the CLI default and returns
+changed/unchanged/unknown without AX work. Use `none` when no post-action observation is needed.
+Use `delta` after a cached Snapshot when the next adaptive decision needs updated structure.
+Never interpret `document_changed=false` when `document_change_known=false`; take a Snapshot.
+Human output names the state and Delta fallback; `--json` preserves the structured fields.
 
 When an interaction or assertion fails, prefer `--json` and inspect `error.data.evidence` before
 retrying. It includes the failure Snapshot, Screenshot, Console errors, Locator match count,
@@ -384,6 +400,8 @@ business/session request, or when the user explicitly requests diagnostics.
 | `tabstride press <key>` | Key/combo (`Enter`, `Ctrl+A`, …); optional ref, CSS, or semantic Locator focuses one target first |
 | `tabstride assert` | Web-first assertion with Auto Wait; supports element state/count and URL equality/regex |
 
+All four interaction commands accept `--page-update none|signal|delta` (default `signal`).
+
 Locator examples:
 
 ```
@@ -455,9 +473,12 @@ Human errors print `error:` + `hint:` on stderr; `--json` includes `code`, `mess
 
 | Situation | Command |
 |-----------|---------|
-| Before first task in a session | `tabstride status` — extension connected? |
-| Any failure you cannot fix in one retry | `tabstride doctor` |
-| Multiple browsers / wrong target | `tabstride browsers` then add `--browser <instance-id>` to the isolated or attach start command |
+| `session start` failed unexpectedly | `tabstride status`; use `doctor` only if status is insufficient |
+| A transport/version failure remains unexplained | `tabstride doctor` |
+| Multiple browsers reported by `session start` | Reuse its candidate list with `--browser <instance-id-or-label>`; do not call `browsers` again |
+
+`user_aborted` is not a retryable protocol failure even though it shares exit code 2: stop
+immediately and wait for a new user request.
 
 Always **`tabstride session stop <id>`** in a `finally`-style path so the Agent Window closes or the attach lease and control overlay are released, and borrowed tabs return.
 
