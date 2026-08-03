@@ -437,4 +437,113 @@ describe("Actionability Engine v1", () => {
 
     expect(result).toMatchObject({ code: "cancelled" });
   });
+
+  it("hovers parent to reveal hidden click targets before timing out", async () => {
+    const ctx = await context();
+    let resolutions = 0;
+    let inspections = 0;
+    const mouseEvents: object[] = [];
+    const hidden: Omit<ActionabilityState, "stable"> = {
+      attached: true,
+      visible: false,
+      enabled: true,
+      editable: true,
+      receives_events: false,
+      not_obscured: false,
+      focusable: false,
+      select: false,
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+    };
+    const send = vi.fn(async (_tabId: number, method: string, params?: object) => {
+      switch (method) {
+        case "DOM.getDocument":
+          return { root: { nodeId: 1 } };
+        case "DOM.querySelectorAll":
+          return { nodeIds: [9] };
+        case "DOM.describeNode":
+          return { node: { backendNodeId: 99 } };
+        case "DOM.scrollIntoViewIfNeeded":
+          return {};
+        case "DOM.resolveNode":
+          resolutions += 1;
+          return { object: { objectId: `node-${resolutions}` } };
+        case "Input.dispatchMouseEvent":
+          mouseEvents.push(params ?? {});
+          return {};
+        case "Runtime.callFunctionOn": {
+          const decl =
+            (params as { functionDeclaration?: string } | undefined)?.functionDeclaration ?? "";
+          if (decl.includes("__tabstrideParentCentre")) {
+            return {
+              result: { value: { x: 200, y: 50, width: 300, height: 40 } },
+            };
+          }
+          const state = inspections === 0 ? hidden : readyState;
+          inspections += 1;
+          return { result: { value: state } };
+        }
+        default:
+          throw new Error(`unexpected CDP call ${method}`);
+      }
+    }) as unknown as CdpRunner["send"];
+
+    const result = await waitForActionable({ send }, ctx, 4, { css: ".destroy" }, "click", {
+      timeoutMs: 2_000,
+      pollIntervalMs: 1,
+    });
+
+    expect(result).not.toHaveProperty("code");
+    // The parent hover should have dispatched mouseMoved to parent centre.
+    expect(mouseEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "mouseMoved", x: 200, y: 50 }),
+      ]),
+    );
+  });
+
+  it("does not hover parent for non-click actions on hidden elements", async () => {
+    const ctx = await context();
+    const hidden: Omit<ActionabilityState, "stable"> = {
+      attached: true,
+      visible: false,
+      enabled: true,
+      editable: true,
+      receives_events: false,
+      not_obscured: false,
+      focusable: false,
+      select: false,
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+    };
+    const mouseEvents: object[] = [];
+    const send = vi.fn(async (_tabId: number, method: string, params?: object) => {
+      switch (method) {
+        case "DOM.getDocument":
+          return { root: { nodeId: 1 } };
+        case "DOM.querySelectorAll":
+          return { nodeIds: [9] };
+        case "DOM.describeNode":
+          return { node: { backendNodeId: 99 } };
+        case "DOM.scrollIntoViewIfNeeded":
+          return {};
+        case "DOM.resolveNode":
+          return { object: { objectId: "node-fill" } };
+        case "Input.dispatchMouseEvent":
+          mouseEvents.push(params ?? {});
+          return {};
+        case "Runtime.callFunctionOn":
+          return { result: { value: hidden } };
+        default:
+          throw new Error(`unexpected CDP call ${method}`);
+      }
+    }) as unknown as CdpRunner["send"];
+
+    const result = await waitForActionable({ send }, ctx, 4, { css: "#title" }, "fill", {
+      timeoutMs: 12,
+      pollIntervalMs: 1,
+    });
+
+    // fill action should NOT trigger parent hover
+    expect(result).toMatchObject({ code: "timeout" });
+    expect(mouseEvents).toHaveLength(0);
+  });
 });

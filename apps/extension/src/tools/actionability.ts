@@ -100,6 +100,7 @@ export async function waitForActionable(
   let attempt = 0;
   const history: FailureActionabilityAttempt[] = [];
   const timing = { locatorMs: 0, waitMs: 0, cdpMs: 0 };
+  let parentHoverAttempted = false;
 
   while (true) {
     if (options.signal?.aborted) {
@@ -121,6 +122,7 @@ export async function waitForActionable(
       previousRect = undefined;
       previousBackendNodeId = undefined;
       lastScrolledNodeId = undefined;
+      parentHoverAttempted = false;
     } else {
       matchCount = 1;
       lastLocatorError = undefined;
@@ -156,6 +158,30 @@ export async function waitForActionable(
           };
         }
         lastFailedCheck = failed;
+
+        // For click actions on hidden elements (e.g. hover-revealed destroy
+        // buttons, dropdown menus), dispatch mouseMoved to the parent centre
+        // to trigger CSS :hover.  One attempt per resolved node.
+        if (
+          action === "click" &&
+          lastState.attached &&
+          !lastState.visible &&
+          !parentHoverAttempted &&
+          (!lastState.rect ||
+            (lastState.rect.width === 0 && lastState.rect.height === 0))
+        ) {
+          parentHoverAttempted = true;
+          const hoverStartedAt = performance.now();
+          await hoverParentForHiddenElement(
+            cdp,
+            tabId,
+            resolved.backendNodeId,
+          );
+          timing.cdpMs += performance.now() - hoverStartedAt;
+          // Allow CSS :hover to apply before re-inspecting.
+          await new Promise((r) => setTimeout(r, 80));
+          continue;
+        }
       }
     }
     history.push({
@@ -195,6 +221,56 @@ export async function waitForActionable(
     if (wakeReason === "cancelled" || options.signal?.aborted) {
       return { code: "cancelled", message: `${action} actionability wait aborted` };
     }
+  }
+}
+
+/**
+ * Best-effort: dispatch mouseMoved to the parent element's centre to
+ * trigger CSS :hover for elements hidden until their ancestor is hovered
+ * (e.g. TodoMVC destroy buttons, dropdown menus).
+ */
+async function hoverParentForHiddenElement(
+  cdp: CdpRunner,
+  tabId: number,
+  backendNodeId: number,
+): Promise<void> {
+  try {
+    const resolved = await cdp.send<{ object?: { objectId?: string } }>(
+      tabId,
+      "DOM.resolveNode",
+      { backendNodeId },
+    );
+    const objectId = resolved.object?.objectId;
+    if (!objectId) return;
+
+    const parentRect = await cdp.send<{
+      result?: { value?: { x: number; y: number; width: number; height: number } | null };
+    }>(tabId, "Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: `function __tabstrideParentCentre() {
+        const parent = this.parentElement;
+        if (!parent) return null;
+        const rect = parent.getBoundingClientRect();
+        if (!rect || rect.width === 0 || rect.height === 0) return null;
+        return {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+          width: rect.width,
+          height: rect.height
+        };
+      }`,
+      returnByValue: true,
+    });
+    const centre = parentRect.result?.value;
+    if (!centre) return;
+
+    await cdp.send(tabId, "Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: centre.x,
+      y: centre.y,
+    });
+  } catch {
+    // Best-effort; silently ignore failures.
   }
 }
 

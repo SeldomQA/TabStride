@@ -394,13 +394,20 @@ business/session request, or when the user explicitly requests diagnostics.
 
 | Command | Summary |
 |---------|---------|
-| `tabstride click <ref-or-css>` | Click one strict target; also accepts semantic Locator flags (`--button`, `--click-count`, `--modifiers`) |
-| `tabstride fill <ref-or-css> --value <text>` | Clear and type into one strict target; also accepts semantic Locator flags |
+| `tabstride click <ref-or-css>` | Click one strict target; also accepts semantic locator flags (`--button`, `--click-count`, `--modifiers`). Automatically hovers the parent element when the target is hidden by CSS `:hover` (e.g. destroy buttons, dropdown menus) — no separate hover command needed. |
+| `tabstride fill <ref-or-css> --value <text>` | Clear and type into one strict target; also accepts semantic locator flags |
 | `tabstride select <ref-or-css> --value <v>` | Set one strict `<select>` target by `value`; repeat `--value` for multi-select |
-| `tabstride press <key>` | Key/combo (`Enter`, `Ctrl+A`, …); optional ref, CSS, or semantic Locator focuses one target first |
+| `tabstride press <key>` | Key/combo (`Enter`, `Ctrl+A`, …); optional ref, CSS, or semantic locator focuses one target first |
 | `tabstride assert` | Web-first assertion with Auto Wait; supports element state/count and URL equality/regex |
 
 All four interaction commands accept `--page-update none|signal|delta` (default `signal`).
+
+**Auto-hover for click targets:** When a `click` target exists in the DOM but is hidden by CSS
+(e.g. `display: none` until a parent is hovered — common for delete buttons, action menus, and
+toolbar icons), the actionability engine automatically dispatches `mouseMoved` to the parent
+element's centre to trigger CSS `:hover`. This happens transparently during the actionability
+poll; no separate hover command or workaround is needed. The mechanism retries once per resolved
+node; if the parent hover does not reveal the element, the standard timeout error fires.
 
 Locator examples:
 
