@@ -100,7 +100,7 @@ export async function waitForActionable(
   let attempt = 0;
   const history: FailureActionabilityAttempt[] = [];
   const timing = { locatorMs: 0, waitMs: 0, cdpMs: 0 };
-  let parentHoverAttempted = false;
+  let hoveredBackendNodeId: number | undefined;
 
   while (true) {
     if (options.signal?.aborted) {
@@ -122,7 +122,7 @@ export async function waitForActionable(
       previousRect = undefined;
       previousBackendNodeId = undefined;
       lastScrolledNodeId = undefined;
-      parentHoverAttempted = false;
+      hoveredBackendNodeId = undefined;
     } else {
       matchCount = 1;
       lastLocatorError = undefined;
@@ -166,21 +166,32 @@ export async function waitForActionable(
           action === "click" &&
           lastState.attached &&
           !lastState.visible &&
-          !parentHoverAttempted &&
-          (!lastState.rect ||
-            (lastState.rect.width === 0 && lastState.rect.height === 0))
+          hoveredBackendNodeId !== resolved.backendNodeId &&
+          (!lastState.rect || (lastState.rect.width === 0 && lastState.rect.height === 0))
         ) {
-          parentHoverAttempted = true;
+          hoveredBackendNodeId = resolved.backendNodeId;
           const hoverStartedAt = performance.now();
-          await hoverParentForHiddenElement(
-            cdp,
-            tabId,
-            resolved.backendNodeId,
-          );
+          await hoverParentForHiddenElement(cdp, tabId, resolved.backendNodeId);
           timing.cdpMs += performance.now() - hoverStartedAt;
-          // Allow CSS :hover to apply before re-inspecting.
-          await new Promise((r) => setTimeout(r, 80));
-          continue;
+          // Allow CSS :hover to apply, while preserving the action deadline
+          // and cancellation semantics used by the normal auto-wait path.
+          const remainingMs = deadline - performance.now();
+          if (remainingMs > 0) {
+            const hoverWaitMs = Math.min(80, remainingMs);
+            const waitStartedAt = performance.now();
+            const wakeReason = options.waitForChange
+              ? await options.waitForChange(hoverWaitMs)
+              : await waitForPageChange(cdp, tabId, {
+                  maxWaitMs: hoverWaitMs,
+                  fallbackMs: hoverWaitMs,
+                  signal: options.signal,
+                });
+            timing.waitMs += performance.now() - waitStartedAt;
+            if (wakeReason === "cancelled" || options.signal?.aborted) {
+              return { code: "cancelled", message: `${action} actionability wait aborted` };
+            }
+            if (performance.now() < deadline) continue;
+          }
         }
       }
     }
@@ -235,11 +246,9 @@ async function hoverParentForHiddenElement(
   backendNodeId: number,
 ): Promise<void> {
   try {
-    const resolved = await cdp.send<{ object?: { objectId?: string } }>(
-      tabId,
-      "DOM.resolveNode",
-      { backendNodeId },
-    );
+    const resolved = await cdp.send<{ object?: { objectId?: string } }>(tabId, "DOM.resolveNode", {
+      backendNodeId,
+    });
     const objectId = resolved.object?.objectId;
     if (!objectId) return;
 
@@ -248,16 +257,21 @@ async function hoverParentForHiddenElement(
     }>(tabId, "Runtime.callFunctionOn", {
       objectId,
       functionDeclaration: `function __tabstrideParentCentre() {
-        const parent = this.parentElement;
-        if (!parent) return null;
-        const rect = parent.getBoundingClientRect();
-        if (!rect || rect.width === 0 || rect.height === 0) return null;
-        return {
-          x: rect.left + rect.width / 2,
-          y: rect.top + rect.height / 2,
-          width: rect.width,
-          height: rect.height
-        };
+        for (let parent = this.parentElement; parent; parent = parent.parentElement) {
+          const rect = parent.getBoundingClientRect();
+          const style = this.ownerDocument.defaultView.getComputedStyle(parent);
+          if (rect && rect.width > 0 && rect.height > 0 &&
+              style.display !== 'none' && style.visibility !== 'hidden' &&
+              style.visibility !== 'collapse') {
+            return {
+              x: rect.left + rect.width / 2,
+              y: rect.top + rect.height / 2,
+              width: rect.width,
+              height: rect.height
+            };
+          }
+        }
+        return null;
       }`,
       returnByValue: true,
     });

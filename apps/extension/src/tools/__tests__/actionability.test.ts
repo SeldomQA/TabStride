@@ -490,15 +490,129 @@ describe("Actionability Engine v1", () => {
     const result = await waitForActionable({ send }, ctx, 4, { css: ".destroy" }, "click", {
       timeoutMs: 2_000,
       pollIntervalMs: 1,
+      waitForChange: async () => "fallback",
     });
 
     expect(result).not.toHaveProperty("code");
     // The parent hover should have dispatched mouseMoved to parent centre.
     expect(mouseEvents).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: "mouseMoved", x: 200, y: 50 }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ type: "mouseMoved", x: 200, y: 50 })]),
     );
+  });
+
+  it("retries parent hover when locator re-resolves to a replacement node", async () => {
+    const ctx = await context();
+    let locatorPass = 0;
+    const hoveredNodes: number[] = [];
+    const hidden: Omit<ActionabilityState, "stable"> = {
+      attached: true,
+      visible: false,
+      enabled: true,
+      editable: true,
+      receives_events: false,
+      not_obscured: false,
+      focusable: false,
+      select: false,
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+    };
+    const send = vi.fn(async (_tabId: number, method: string, params?: object) => {
+      switch (method) {
+        case "DOM.getDocument":
+          return { root: { nodeId: 1 } };
+        case "DOM.querySelectorAll":
+          locatorPass += 1;
+          return { nodeIds: [9] };
+        case "DOM.describeNode":
+          return { node: { backendNodeId: locatorPass === 1 ? 99 : 100 } };
+        case "DOM.scrollIntoViewIfNeeded":
+          return {};
+        case "DOM.resolveNode":
+          return {
+            object: {
+              objectId: `node-${(params as { backendNodeId?: number } | undefined)?.backendNodeId}`,
+            },
+          };
+        case "Input.dispatchMouseEvent": {
+          const x = (params as { x?: number } | undefined)?.x;
+          if (x !== undefined) hoveredNodes.push(x);
+          return {};
+        }
+        case "Runtime.callFunctionOn": {
+          const call = params as { objectId?: string; functionDeclaration?: string } | undefined;
+          if (call?.functionDeclaration?.includes("__tabstrideParentCentre")) {
+            const backendNodeId = Number(call.objectId?.replace("node-", ""));
+            return {
+              result: { value: { x: backendNodeId, y: 50, width: 40, height: 20 } },
+            };
+          }
+          return { result: { value: hoveredNodes.length >= 2 ? readyState : hidden } };
+        }
+        default:
+          throw new Error(`unexpected CDP call ${method}`);
+      }
+    }) as unknown as CdpRunner["send"];
+
+    const result = await waitForActionable({ send }, ctx, 4, { css: ".destroy" }, "click", {
+      timeoutMs: 2_000,
+      pollIntervalMs: 1,
+      waitForChange: async () => "fallback",
+    });
+
+    expect(result).not.toHaveProperty("code");
+    expect(hoveredNodes).toEqual([99, 100]);
+  });
+
+  it("uses the cancellable auto-wait path after parent hover", async () => {
+    const ctx = await context();
+    const waitBudgets: number[] = [];
+    const hidden: Omit<ActionabilityState, "stable"> = {
+      attached: true,
+      visible: false,
+      enabled: true,
+      editable: true,
+      receives_events: false,
+      not_obscured: false,
+      focusable: false,
+      select: false,
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+    };
+    const send = vi.fn(async (_tabId: number, method: string, params?: object) => {
+      switch (method) {
+        case "DOM.getDocument":
+          return { root: { nodeId: 1 } };
+        case "DOM.querySelectorAll":
+          return { nodeIds: [9] };
+        case "DOM.describeNode":
+          return { node: { backendNodeId: 99 } };
+        case "DOM.scrollIntoViewIfNeeded":
+        case "Input.dispatchMouseEvent":
+          return {};
+        case "DOM.resolveNode":
+          return { object: { objectId: "node-99" } };
+        case "Runtime.callFunctionOn": {
+          const declaration =
+            (params as { functionDeclaration?: string } | undefined)?.functionDeclaration ?? "";
+          return declaration.includes("__tabstrideParentCentre")
+            ? { result: { value: { x: 20, y: 20, width: 40, height: 20 } } }
+            : { result: { value: hidden } };
+        }
+        default:
+          throw new Error(`unexpected CDP call ${method}`);
+      }
+    }) as unknown as CdpRunner["send"];
+
+    const result = await waitForActionable({ send }, ctx, 4, { css: ".destroy" }, "click", {
+      timeoutMs: 10,
+      waitForChange: async (remainingMs) => {
+        waitBudgets.push(remainingMs);
+        return "cancelled";
+      },
+    });
+
+    expect(result).toMatchObject({ code: "cancelled" });
+    expect(waitBudgets).toHaveLength(1);
+    expect(waitBudgets[0]).toBeGreaterThan(0);
+    expect(waitBudgets[0]).toBeLessThanOrEqual(10);
   });
 
   it("does not hover parent for non-click actions on hidden elements", async () => {
