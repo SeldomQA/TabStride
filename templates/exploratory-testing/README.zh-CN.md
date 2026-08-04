@@ -1,6 +1,6 @@
 # TabStride 探索性测试模板
 
-一份方法论模板，教会 AI Agent 如何使用 [TabStride](https://github.com/user/TabStride)
+一份方法论模板，教会 AI Agent 如何使用 [TabStride](https://github.com/SeldomQA/TabStride)
 进行系统化的探索性测试。
 
 ## 这是什么？
@@ -60,6 +60,7 @@ templates/exploratory-testing/
 SKILL.md 设计为可按需调整：
 
 - 针对大型应用调整范围限制（最大页面数、导航深度）
+- 为每次探索任务调整时间盒和场景数量预算
 - 添加领域特定的提问类别（如合规性、无障碍）
 - 扩展发现结构，增加团队需要的字段（如 Jira ID）
 - 修改报告格式以匹配组织的模板

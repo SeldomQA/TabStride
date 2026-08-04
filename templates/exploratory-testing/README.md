@@ -1,7 +1,7 @@
 # Exploratory Testing Template for TabStride
 
 A methodology template that teaches AI agents how to perform systematic
-exploratory testing using [TabStride](https://github.com/user/TabStride).
+exploratory testing using [TabStride](https://github.com/SeldomQA/TabStride).
 
 ## What is this?
 
@@ -61,6 +61,7 @@ templates/exploratory-testing/
 The SKILL.md is designed to be adapted:
 
 - Adjust scope limits (max pages, navigation depth) for larger applications
+- Adjust timeboxes and scenario budgets for each exploration charter
 - Add domain-specific question categories (e.g., compliance, accessibility)
 - Extend the finding structure with fields your team needs (e.g., Jira ID)
 - Modify the report format to match your organization's template

@@ -4,14 +4,18 @@
 **Date:** 2026-08-01
 **Duration:** ~15 minutes
 **Session:** 9c41f7a2-3b8e-4d1a-a5f6-2e7c8d9b0a1f
+**Environment/build:** Public Playwright demo; build identifier not exposed
+**Account role:** Anonymous visitor
+**Browser/viewport:** Chrome desktop, 1440 × 900
+**Start URL:** https://demo.playwright.dev/todomvc/#/
+**Authorization:** Creating, editing, completing, and deleting demo todos
 
 ## Summary
 
-Explored the TodoMVC demo across 19 planned scenarios covering main CRUD
-operations, field boundaries, state handling, and error recovery. Found 1
-low-severity observation. The application is well-implemented with correct
-filtering, trimming, and keyboard handling. No critical or high-severity
-defects discovered.
+Executed 18 of 20 planned TodoMVC scenarios covering main operations, field
+boundaries, state handling, and error recovery. No confirmed defects were
+found. Script-like input was safely rendered as literal text; two scenarios
+remain untested because their expected behavior or feasible path was unclear.
 
 ## Feature Map
 
@@ -22,31 +26,25 @@ Key areas: task input, task list items (toggle/edit/delete), footer
 
 ## Coverage
 
-| Category | Planned | Executed | Findings |
-|----------|---------|----------|----------|
+| Category | Planned | Executed | Confirmed defects |
+|----------|---------|----------|-------------------|
 | Main path | 5 | 5 | 0 |
-| Field boundaries | 6 | 6 | 1 |
+| Field boundaries | 6 | 5 | 0 |
 | State/repetition | 5 | 5 | 0 |
 | Error recovery | 4 | 3 | 0 |
-| **Total** | **20** | **19** | **1** |
+| **Total** | **20** | **18** | **0** |
 
-## Findings
+## Confirmed Defects
 
-### F-1: Script tag rendered as visible text in todo label
+No confirmed defects.
 
-- **Severity:** low
-- **Steps to reproduce:**
-  1. Enter `<script>alert(1)</script>` in the todo input
-  2. Press Enter
-  3. Observe the created todo item
-- **Expected:** Text displayed as literal string (escaped)
-- **Actual:** Text displayed correctly as literal string; no script execution.
-  However, raw HTML entities visible in DOM inspection without explicit
-  escaping indicator — cosmetic concern only.
-- **URL:** https://demo.playwright.dev/todomvc/#/
-- **Evidence:** Snapshot shows `.todo-list li label` containing the text;
-  no console errors; no script execution observed.
-- **Reproducible:** yes
+## Risks, Questions, and Observations
+
+- **O-1 — Script-like input handled safely:** `<script>alert(1)</script>` was
+  displayed as literal text and did not execute. Oracle: browser security
+  standard. Result: pass.
+- **Q-1 — Edit to empty:** Expected behavior is not stated by the UI or an
+  available requirement, so this was not classified as a defect.
 
 ## Risks and Boundaries
 
@@ -64,11 +62,24 @@ Key areas: task input, task list items (toggle/edit/delete), footer
 
 ## Blocked
 
-- None
+- Delete item while in edit mode — no safe, reachable path was identified.
+
+## Test Data and Cleanup
+
+- **Cleaned:** All todos created by this exploration were removed.
+- **Retained:** None.
+- **Cleanup blocked:** None.
+
+## Evidence Index
+
+- **O-1:** Scenario 2.3 Snapshot and screenshot; no new Console errors.
+- **Coverage:** Final Coverage Ledger and Test Data Ledger.
 
 ## Recommendations
 
-- Add a formal test case for XSS payloads in todo text (regression guard)
+- Preserve the passing script-like-input case as a security regression guard
 - Add a formal test case for edit-to-empty behavior (clarify spec)
 - Consider testing with 100+ items for scroll performance (separate
   performance test, not exploratory)
+
+Session stopped. 0 confirmed defects, 18 scenarios covered.

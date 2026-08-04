@@ -11,16 +11,22 @@
 - [x] 1.5 Filter All/Active/Completed — **pass**
 - [x] 2.1 Empty input — **pass** (no item created)
 - [x] 2.2 Long text (200 chars) — **pass** (displays correctly)
-- [x] 2.3 Special characters — **finding F-1**
+- [x] 2.3 Special characters — **pass** (rendered as literal text; no execution)
 - [x] 2.4 Unicode input — **pass**
 - [x] 2.5 Leading/trailing spaces — **pass** (trimmed)
 - [x] 3.1 Rapid toggle — **pass** (no race condition)
 - [x] 3.2 Duplicate text — **pass** (duplicates allowed)
 
-## Findings
+## Confirmed defects
 
-- **F-1:** XSS payload rendered as text but `<script>` tag visible in DOM
-  without escaping indicator — severity: low (no execution, but worth noting)
+- None
+
+## Risks / Questions / Observations
+
+- **O-1:** Script-like input is rendered as literal text and does not execute;
+  the security boundary behaved as expected.
+- **Q-1:** Expected behavior for editing an item to an empty value is not yet
+  established.
 
 ## Not covered
 
@@ -33,3 +39,10 @@
 ## Blocked
 
 - [ ] None currently
+
+## Test Data Ledger
+
+| ID / identifying value | Scenario | Change | Cleanup authorized? | Final state |
+|------------------------|----------|--------|---------------------|-------------|
+| todo: EXP-meal | 1.1 | created | yes | retained until remaining scenarios finish |
+| todo: EXP-code | 1.1 | created, edited | yes | retained until remaining scenarios finish |

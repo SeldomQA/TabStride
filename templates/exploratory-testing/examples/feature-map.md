@@ -1,5 +1,13 @@
 # Feature Map: TodoMVC Demo
 
+## Environment Baseline
+
+- **Environment/build:** Public Playwright demo; build identifier not exposed
+- **Account role:** Anonymous visitor
+- **Browser/viewport:** Chrome desktop, 1440 × 900
+- **Start URL:** https://demo.playwright.dev/todomvc/#/
+- **Baseline:** Empty todo list; no pre-existing Console errors observed
+
 ## Task Input
 
 - **URL:** https://demo.playwright.dev/todomvc/#/

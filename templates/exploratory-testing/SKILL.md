@@ -64,6 +64,20 @@ During reconnaissance you MUST NOT:
 - Navigate away from the application
 - Execute JavaScript that modifies state
 
+Read-only exploration is the default authorization level. A request such as
+"explore this page" or "find bugs" does not by itself authorize creating,
+editing, deleting, sending, paying, publishing, or changing permissions.
+
+Before any state-changing scenario, record its authorization as one of:
+
+- **authorized** — the user explicitly allowed this operation and environment;
+- **read-only** — continue observing, but do not perform the operation;
+- **blocked** — safety or impact is uncertain and explicit approval is required.
+
+Authorization for one operation does not imply authorization for another. For
+example, permission to create test records does not imply permission to delete
+existing records or send real notifications.
+
 You MAY:
 
 - `tabstride snapshot` — read page structure
@@ -77,6 +91,9 @@ You MAY:
 
 - Maximum navigation depth: 3 levels from the entry page
 - Maximum distinct pages: 10 (unless the user expands scope)
+- Default total timebox: 30 minutes (unless the user provides another budget)
+- Maximum planned executable scenarios: 20 per exploration charter
+- Reassess any scenario that consumes 5 minutes without producing new evidence
 - Stop reconnaissance when: main CRUD paths are identified, or scope limit
   reached, or no new functionality discovered in the last 2 pages
 
@@ -84,7 +101,10 @@ You MAY:
 
 ```
 1. session start --mode attach --tab active --snapshot
-2. Record: URL, title, visible navigation elements
+2. Record the environment baseline:
+   - application environment and visible build/version, if available
+   - start time, URL, title, account role, browser, and viewport
+   - baseline Snapshot, screenshot, and existing Console errors
 3. For each major navigation item (up to scope limit):
    a. Navigate or click to reveal the section
    b. snapshot → identify forms, lists, actions, states
@@ -98,6 +118,13 @@ You MAY:
 
 ```markdown
 # Feature Map: [Module Name]
+
+## Environment Baseline
+- **Environment/build:** [environment and visible version]
+- **Account role:** [current role]
+- **Browser/viewport:** [browser version and viewport]
+- **Start URL:** [entry URL]
+- **Baseline:** [initial state and pre-existing errors]
 
 ## [Page/Section 1]
 - **URL:** /path
@@ -123,7 +150,8 @@ You MAY:
 - Ask at most 5 questions
 - Only ask what changes your exploration plan
 - If the user says "I don't know" or does not answer, proceed with defaults
-- Never block on unanswered questions
+- Never block the entire exploration on unanswered questions; continue the
+  read-only portion and mark affected state-changing scenarios as blocked
 
 ### Question categories (pick the most impactful)
 
@@ -136,7 +164,8 @@ You MAY:
 ### Default assumptions (when user provides no answers)
 
 - Assume the main CRUD path is the core journey
-- Assume creating test data is acceptable; deleting is not
+- Assume no creation, modification, deletion, sending, payment, publishing, or
+  permission changes are authorized
 - Assume all buttons with destructive labels have real side effects
 - Assume no known issues; discover fresh
 - Assume single-role access with the current session
@@ -155,11 +184,17 @@ You MAY:
 **Objective:** [one sentence]
 **Scope:** [pages/modules covered]
 **Data policy:** [what will be created/modified]
+**Authorization:** [read-only and explicitly authorized operations]
+**Cleanup policy:** [what will be removed/restored, by whom, and when]
+**Timebox:** [total duration and maximum scenarios]
+**Stop conditions:** [budget, safety, blocker, or coverage conditions]
 
 ## Scenarios
 
 ### 1. Main path (priority: high)
 - [ ] Happy path: create → verify → edit → verify
+  - Hypothesis: [what behavior is being tested]
+  - Oracle: [source of the expected result]
 - [ ] Minimum valid input
 - [ ] Full valid input
 
@@ -187,7 +222,9 @@ You MAY:
 ### User confirmation
 
 Present the plan and ask: "Confirm, add, or remove scenarios?"
-If the user confirms or does not respond within one turn, proceed.
+If the user confirms, execute the authorized plan. If the user does not confirm
+or skips the question, continue only with read-only scenarios. Never treat
+silence as approval for state-changing actions.
 
 ---
 
@@ -200,12 +237,49 @@ If the user confirms or does not respond within one turn, proceed.
 ```
 For each scenario (in priority order):
   1. Announce: "Executing: [scenario name]"
-  2. Perform the steps using tabstride commands
-  3. After each step: check document_changed, observe result
-  4. If unexpected behavior → record a Finding
-  5. Update Coverage Ledger
-  6. If blocked → mark as blocked, move to next scenario
+  2. Verify that every state-changing step is authorized
+  3. Capture the relevant starting state
+  4. Perform the steps using tabstride commands
+  5. After each step: check document_changed, observe result
+  6. Record created or modified data immediately
+  7. Compare the result with the recorded Oracle
+  8. Classify unexpected behavior before recording it
+  9. Update Coverage Ledger
+  10. Clean up when authorized and safe; otherwise record retained data
+  11. If blocked → mark as blocked, move to next scenario
 ```
+
+### Test Oracle rules
+
+Every scenario must state why its expected result is credible. Use the strongest
+available Oracle source:
+
+1. **Requirement** — an accepted specification, acceptance criterion, or
+   explicit statement from the user;
+2. **Product contract** — visible labels, validation messages, documented
+   limits, API contract, or accessibility semantics;
+3. **Consistency** — the same value or state should agree across list, detail,
+   refresh, filters, or equivalent workflows;
+4. **Recognized standard** — a security, accessibility, browser, or domain rule
+   that is applicable to this product;
+5. **Heuristic** — a plausible usability or quality expectation used to guide
+   exploration.
+
+A heuristic alone is not enough to confirm a defect. If the expected behavior
+cannot be established, record a Question, Risk, or Observation instead.
+
+### Result classification
+
+- **Defect** — observed behavior contradicts a credible Oracle and is
+  reproducible or supported by strong evidence;
+- **Risk** — no failure is confirmed, but impact or an important edge remains
+  insufficiently controlled or tested;
+- **Question** — expected behavior or business policy needs clarification;
+- **Observation** — neutral information useful for understanding the product;
+- **Blocker** — the scenario cannot be executed safely or completely.
+
+Do not create a Defect merely to make the report look productive. A report with
+zero confirmed defects is valid.
 
 ### Coverage Ledger (maintain throughout)
 
@@ -213,10 +287,13 @@ For each scenario (in priority order):
 # Coverage Ledger
 
 ## Covered
-- [x] [scenario] — [result: pass/finding]
+- [x] [scenario] — [result: pass/defect/risk/question/observation]
 
-## Findings
-- [F-1] [title] — [severity]
+## Confirmed defects
+- [D-1] [confirmed defect title] — [severity]
+
+## Risks / Questions / Observations
+- [R-1/Q-1/O-1] [title]
 
 ## Not covered
 - [ ] [scenario] — [reason: blocked/out-of-scope/deferred]
@@ -228,14 +305,32 @@ For each scenario (in priority order):
 Update the ledger after every scenario. The user can ask "progress?" at any
 time to see the current ledger.
 
-### Finding structure
+### Test Data Ledger
 
-When you discover unexpected behavior:
+Maintain this whenever any scenario creates or modifies state:
 
 ```markdown
-### F-[N]: [Short title]
+# Test Data Ledger
+
+| ID / identifying value | Scenario | Change | Cleanup authorized? | Final state |
+|------------------------|----------|--------|---------------------|-------------|
+| customer: EXP-001 | Main path | created | yes | cleaned |
+| order: draft-42 | Boundary | modified | no | retained — user notified |
+```
+
+Use clearly identifiable test values when possible. Never delete pre-existing
+data as cleanup. At the end, every entry must be `cleaned`, `retained`, or
+`cleanup blocked`; do not silently leave its state unknown.
+
+### Confirmed defect structure
+
+Use this structure only when behavior contradicts a credible Oracle:
+
+```markdown
+### D-[N]: [Short title]
 
 - **Severity:** critical / high / medium / low / cosmetic
+- **Oracle source:** requirement / product contract / consistency / standard
 - **Steps to reproduce:**
   1. [action]
   2. [action]
@@ -246,14 +341,24 @@ When you discover unexpected behavior:
 - **Reproducible:** yes / intermittent / once
 ```
 
+Record Risks, Questions, Observations, and Blockers in separate lists. They may
+include evidence and impact, but they must not be counted as confirmed defects.
+
 ### Evidence collection
 
-For every finding, capture at minimum:
+For every confirmed defect, capture at minimum:
 
-- The assertion or observation that revealed the issue
-- `tabstride snapshot` of the current state
-- Console errors if present (from error data or evidence)
-- The exact sequence of commands that triggered it
+- environment, account role, current URL, and relevant test data;
+- the Oracle source and expected result;
+- the exact action path or commands that triggered it;
+- the relevant state before the action;
+- a `tabstride snapshot` and screenshot of the resulting state;
+- the actual result and reproducibility status.
+
+Capture Console or Network/CDP evidence only when it helps explain the issue.
+Record whether an error appeared during the scenario or already existed at
+baseline. For Risks and Blockers, collect only the evidence needed to support
+the stated concern; avoid noisy evidence dumps.
 
 Use `--json` on failing commands to capture structured evidence.
 
@@ -266,7 +371,26 @@ Mark a scenario as blocked when:
 - The target feature is broken and cannot be reached
 - You are uncertain whether an action is safe
 
+Continue with unrelated safe scenarios after marking a scenario blocked. Do
+not reinterpret a general testing request as permission to bypass the block.
+
 Do not guess. Do not retry blocked scenarios without new information.
+
+### Stop conditions
+
+Stop executing new scenarios and move to cleanup/reporting when any of these is
+true:
+
+- the user cancels or pauses the exploration;
+- the agreed time or scenario budget is exhausted;
+- continuing would cross an authorization or safety boundary;
+- a critical issue makes further testing unsafe or would corrupt evidence;
+- repeated blockers prevent meaningful new coverage;
+- the planned high-priority coverage is complete and additional scenarios are
+  producing no new information.
+
+Hitting a stop condition is not a failed exploration. Preserve the ledger,
+clean up authorized test data, and report what remains uncovered.
 
 ---
 
@@ -283,6 +407,11 @@ Do not guess. Do not retry blocked scenarios without new information.
 **Date:** [date]
 **Duration:** [time spent]
 **Session:** [tabstride session id]
+**Environment/build:** [test/staging/production and visible version]
+**Account role:** [current role; never include credentials]
+**Browser/viewport:** [browser version and viewport]
+**Start URL:** [entry URL]
+**Authorization:** [operations explicitly permitted for this run]
 
 ## Summary
 
@@ -294,16 +423,20 @@ Do not guess. Do not retry blocked scenarios without new information.
 
 ## Coverage
 
-| Category | Planned | Executed | Findings |
-|----------|---------|----------|----------|
+| Category | Planned | Executed | Confirmed defects |
+|----------|---------|----------|-------------------|
 | Main path | N | N | N |
 | Field boundaries | N | N | N |
 | State/repetition | N | N | N |
 | Error recovery | N | N | N |
 
-## Findings
+## Confirmed Defects
 
-[All findings from Phase 4, ordered by severity]
+[Confirmed defects from Phase 4, ordered by severity]
+
+## Risks, Questions, and Observations
+
+[Items that need attention but are not confirmed defects]
 
 ## Risks and Boundaries
 
@@ -318,6 +451,16 @@ Do not guess. Do not retry blocked scenarios without new information.
 
 - [What could not be tested and what is needed]
 
+## Test Data and Cleanup
+
+- **Cleaned:** [records restored or removed]
+- **Retained:** [records intentionally left and why]
+- **Cleanup blocked:** [records requiring follow-up]
+
+## Evidence Index
+
+- [D/R/Q/O/B-ID]: [snapshot, screenshot, console, or network artifact links]
+
 ## Recommendations
 
 - [Suggested formal test cases to add]
@@ -328,7 +471,7 @@ Do not guess. Do not retry blocked scenarios without new information.
 
 - Output the report as Markdown in the conversation
 - If the user wants a file, write to a path they specify
-- Always end with: "Session stopped. [N] findings, [M] scenarios covered."
+- Always end with: "Session stopped. [N] confirmed defects, [M] scenarios covered."
 
 ---
 
@@ -351,5 +494,5 @@ on top. All TabStride rules still apply:
 | Execution path | Flow | Persistent client |
 | Snapshot frequency | Minimal | After every navigation |
 | Data modification | Intended | Carefully controlled |
-| Output | Task result | Findings + report |
-| Failure meaning | Task failed | Potential finding |
+| Output | Task result | Coverage + classified results + report |
+| Failure meaning | Task failed | Evidence to classify; not automatically a defect |
