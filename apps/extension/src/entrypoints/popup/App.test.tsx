@@ -55,10 +55,14 @@ describe("App", () => {
   });
 
   it("shows status label without helper subtitle", () => {
-    render(<App />);
+    const { container } = render(<App />);
 
     expect(screen.getByText("未连接")).toBeTruthy();
     expect(screen.queryByText("请先打开 TabStride。")).toBeNull();
+    expect(container.querySelector("[data-slot='popup-root']")?.className).toContain("bg-white");
+    expect(container.querySelector("[data-slot='popup-connection-card']")?.className).toContain(
+      "bg-white",
+    );
   });
 
   it("shows single-line compact metadata and copies the instance id", async () => {

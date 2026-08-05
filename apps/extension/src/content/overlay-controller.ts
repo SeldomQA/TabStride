@@ -1,4 +1,3 @@
-import type { OverlayOperationLogEntry } from "@/lib/overlay-bridge";
 import type { BorrowRequestData } from "./BorrowConfirmationOverlay";
 import type { HelpRequestData } from "./HelpRequestOverlay";
 
@@ -9,7 +8,6 @@ export interface OverlayState {
   interrupting: boolean;
   activeSessionId: string | null;
   automationBypassCount: number;
-  operationLogs: OverlayOperationLogEntry[];
 }
 
 type MutableOverlayState = Omit<OverlayState, "controlVisible">;
@@ -25,7 +23,6 @@ export class OverlayController {
     interrupting: false,
     activeSessionId: null,
     automationBypassCount: 0,
-    operationLogs: [],
   };
 
   snapshot(): OverlayState {
@@ -33,7 +30,6 @@ export class OverlayController {
       ...this.state,
       controlVisible: this.isControlVisible(),
       borrowRequests: [...this.state.borrowRequests],
-      operationLogs: this.state.operationLogs.map((entry) => ({ ...entry })),
     };
   }
 
@@ -53,9 +49,6 @@ export class OverlayController {
   }
 
   activateAgentSession(sessionId: string): void {
-    if (this.state.activeSessionId !== sessionId) {
-      this.state.operationLogs = [];
-    }
     this.state.activeSessionId = sessionId;
     this.state.interrupting = false;
   }
@@ -85,11 +78,6 @@ export class OverlayController {
     }
   }
 
-  setOperationLogs(sessionId: string, logs: OverlayOperationLogEntry[]): void {
-    if (this.state.activeSessionId !== sessionId) return;
-    this.state.operationLogs = logs.map((entry) => ({ ...entry }));
-  }
-
   resetAgentOverlays(sessionId: string): HelpRequestData | null {
     if (this.state.activeSessionId && this.state.activeSessionId !== sessionId) {
       return null;
@@ -101,7 +89,6 @@ export class OverlayController {
       interrupting: false,
       activeSessionId: null,
       automationBypassCount: 0,
-      operationLogs: [],
     };
     return previousHelp;
   }

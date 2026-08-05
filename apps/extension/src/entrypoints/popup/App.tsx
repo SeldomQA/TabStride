@@ -34,17 +34,6 @@ export function App() {
   const [copiedInstanceId, setCopiedInstanceId] = useState(false);
 
   useEffect(() => {
-    const query = window.matchMedia("(prefers-color-scheme: dark)");
-    const applyTheme = (isDark: boolean) => {
-      document.documentElement.classList.toggle("dark", isDark);
-    };
-    applyTheme(query.matches);
-    const onChange = (event: MediaQueryListEvent) => applyTheme(event.matches);
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  }, []);
-
-  useEffect(() => {
     setCopiedInstanceId(false);
   }, [snapshot.instanceId]);
 
@@ -62,7 +51,7 @@ export function App() {
 
   return (
     <main
-      className="min-w-[320px] max-w-[340px] space-y-3 bg-background p-3 text-foreground"
+      className="min-w-[320px] max-w-[340px] space-y-3 bg-white p-3 text-foreground"
       data-slot="popup-root"
       data-version-skew={isSkewed ? "true" : undefined}
     >
@@ -72,7 +61,7 @@ export function App() {
       </header>
 
       <section
-        className="rounded-xl border border-border/80 bg-card/60 px-3 py-2.5"
+        className="rounded-xl border border-border/80 bg-white px-3 py-2.5"
         data-slot="popup-connection-card"
       >
         <div className="flex items-center justify-between gap-2" data-slot="popup-status">
@@ -104,7 +93,7 @@ export function App() {
             >
               <span
                 className={cn(
-                  "pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform",
+                  "pointer-events-none block size-4 rounded-full bg-white shadow-sm transition-transform",
                   snapshot.connectionEnabled ? "translate-x-4" : "translate-x-0.5",
                 )}
                 aria-hidden

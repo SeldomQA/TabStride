@@ -10,7 +10,6 @@ import { OperationLogStore } from "@/lib/operation-log";
 import {
   OVERLAY_MSG_INTERRUPT,
   OVERLAY_MSG_WHO_AM_I,
-  OVERLAY_OPERATION_LOGS,
   type OverlayInterruptRequest,
   type OverlayInterruptResponse,
   type OverlayMessage,
@@ -76,9 +75,7 @@ export default defineBackground(() => {
       postOperationLogsToPopups(popupPorts, operationLogs.listRecent());
       if (entry.method === "tool.session_stop" && entry.status !== "running") {
         operationLogs.clear(entry.sessionId);
-        return;
       }
-      void broadcastOperationLogs(sessions, operationLogs, entry);
     },
   });
   dispatcher.start();
@@ -148,7 +145,6 @@ export default defineBackground(() => {
         (typeof windowId === "number" ? sessions.findByWindowId(windowId) : null);
       sendResponse({
         sessionId: ctx?.sessionId ?? null,
-        operationLogs: ctx ? operationLogs.list(ctx.sessionId) : [],
       });
       return false;
     }
@@ -226,40 +222,6 @@ function postOperationLogsToPopups(
       console.debug("[tabstride operation log] popup post failed", err);
     }
   }
-}
-
-async function broadcastOperationLogs(
-  sessions: SessionManager,
-  store: OperationLogStore,
-  entry: OverlayOperationLogEntry,
-): Promise<void> {
-  const ctx = sessions.get(entry.sessionId);
-  if (!ctx) return;
-  const tabIds = new Set<number>(ctx.borrowedTabs.keys());
-  if (ctx.mode === "attach" && ctx.attachedTabId !== undefined) {
-    tabIds.add(ctx.attachedTabId);
-  } else {
-    try {
-      const tabs = await chrome.tabs.query({ windowId: ctx.agentWindowId });
-      for (const tab of tabs) {
-        if (typeof tab.id === "number") tabIds.add(tab.id);
-      }
-    } catch (err) {
-      console.debug("[tabstride operation log] failed to list Agent Window tabs", err);
-    }
-  }
-  const message = {
-    type: OVERLAY_OPERATION_LOGS,
-    sessionId: entry.sessionId,
-    logs: store.list(entry.sessionId),
-  };
-  await Promise.allSettled(
-    Array.from(tabIds, (tabId) =>
-      chrome.tabs.sendMessage(tabId, message).catch(() => {
-        // Restricted or navigating tabs restore logs through overlay.who_am_i.
-      }),
-    ),
-  );
 }
 
 /**

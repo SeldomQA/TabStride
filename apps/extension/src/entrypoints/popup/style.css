@@ -1,3 +1,15 @@
 @import "@tabstride/ui/styles";
 @source "../../";
 @source "../../../../../packages/ui/src";
+
+:root {
+  color-scheme: light;
+  --background: #fff;
+  --card: #fff;
+}
+
+html,
+body,
+#root {
+  background: #fff;
+}

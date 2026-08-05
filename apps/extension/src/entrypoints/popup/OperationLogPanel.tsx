@@ -35,7 +35,7 @@ export function OperationLogPanel({ logs }: { logs: OverlayOperationLogEntry[] }
 
   return (
     <section
-      className="overflow-hidden rounded-xl border border-border/80 bg-card/60"
+      className="overflow-hidden rounded-xl border border-border/80 bg-white"
       data-slot="popup-operation-logs"
     >
       <button

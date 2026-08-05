@@ -21,12 +21,10 @@ import {
 } from "@/lib/help-bridge";
 import {
   isOverlayAgentOverlayResetMessage,
-  isOverlayOperationLogsMessage,
   OVERLAY_AUTOMATION_BYPASS,
   OVERLAY_MSG_WHO_AM_I,
   type OverlayAgentOverlayResetMessage,
   type OverlayAutomationBypassMessage,
-  type OverlayOperationLogsMessage,
   type OverlayWhoAmIResponse,
 } from "@/lib/overlay-bridge";
 import { TABSTRIDE_OVERLAY_CONTROL_BLOCKING_ATTRIBUTE } from "@/lib/overlay-dom";
@@ -99,7 +97,6 @@ export default defineContentScript({
               visible: overlayState.controlVisible && overlayState.activeHelp === null,
               interrupting: overlayState.interrupting,
               automationBypass: overlayState.automationBypassCount > 0,
-              operationLogs: overlayState.operationLogs,
               onInterrupt: handleInterrupt,
             }),
             React.createElement(HelpRequestOverlay, { request: overlayState.activeHelp }),
@@ -146,8 +143,7 @@ export default defineContentScript({
         | HelpRequestMessage
         | HelpCancelMessage
         | OverlayAgentOverlayResetMessage
-        | OverlayAutomationBypassMessage
-        | OverlayOperationLogsMessage,
+        | OverlayAutomationBypassMessage,
       _sender: chrome.runtime.MessageSender,
       sendResponse: (response: BorrowResponseMessage | HelpResponseMessage) => void,
     ) => {
@@ -165,12 +161,6 @@ export default defineContentScript({
 
       if (isOverlayAgentOverlayResetMessage(message)) {
         resetAgentOverlayState(message.sessionId);
-        return false;
-      }
-
-      if (isOverlayOperationLogsMessage(message)) {
-        overlays.setOperationLogs(message.sessionId, message.logs);
-        renderOverlay();
         return false;
       }
 
@@ -253,7 +243,6 @@ export default defineContentScript({
         })) as OverlayWhoAmIResponse | undefined;
         if (!reply?.sessionId) return;
         overlays.activateAgentSession(reply.sessionId);
-        overlays.setOperationLogs(reply.sessionId, reply.operationLogs ?? []);
         renderOverlay();
       } catch (err) {
         console.debug("[tabstride overlay] who_am_i failed", err);
