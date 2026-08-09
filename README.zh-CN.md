@@ -42,7 +42,7 @@ TabStride 由两个本地运行组件组成：`tabstride` CLI/daemon 和浏览�
 已经在用 Cursor、Claude Code、Codex 或其他支持 Shell 的 Agent？只需复制下面这句话发给 Agent，它会帮你安装 CLI 和 skill，并引导你加载浏览器扩展：
 
 ```text
-按照 https://raw.githubusercontent.com/Tencent/TabStride/main/AGENT_INSTALL.md 的说明，在本机安装并配置 tabstride
+按照 https://raw.githubusercontent.com/SeldomQA/TabStride/main/AGENT_INSTALL.md 的说明，在本机安装并配置 tabstride
 ```
 
 </details>
@@ -52,18 +52,40 @@ TabStride 由两个本地运行组件组成：`tabstride` CLI/daemon 和浏览�
 
 <br>
 
-先安装 CLI，再从 [Chrome Web Store](https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi) 安装浏览器扩展。
+先安装 CLI，再加载浏览器扩展。扩展暂未上架 Chrome 商店，需从 GitHub
+Releases 下载后手动加载（见第 2 步）。
 
 #### 1. 安装 `tabstride` CLI
 
-**macOS / Linux**（推荐，安装到 `~/.local/bin`）：
+**macOS / Linux**（推荐，从 GitHub Releases 安装到 `~/.local/bin`）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Tencent/TabStride/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/SeldomQA/TabStride/main/install.sh | TABSTRIDE_REPO=SeldomQA/TabStride sh
 ```
 
-**Windows**：从 [最新 CLI release](https://github.com/Tencent/TabStride/releases/latest)
-下载 `tabstride-v<version>-x86_64-pc-windows-msvc.zip`，解压后将 `tabstride.exe` 加入 `PATH`。
+**Windows**（PowerShell，安装到 `~/.local/bin`）：
+
+```powershell
+$env:TABSTRIDE_REPO = "SeldomQA/TabStride"; irm https://raw.githubusercontent.com/SeldomQA/TabStride/main/install.ps1 | iex
+```
+
+**手动下载** — 在 [最新 CLI release](https://github.com/SeldomQA/TabStride/releases/latest)
+中按平台下载对应压缩包：
+
+| 平台 | 资产文件 |
+| --- | --- |
+| Windows x64 | `tabstride-v<version>-x86_64-pc-windows-msvc.zip` |
+| macOS Apple Silicon | `tabstride-v<version>-aarch64-apple-darwin.tar.gz` |
+| macOS Intel | `tabstride-v<version>-x86_64-apple-darwin.tar.gz` |
+| Linux x64 | `tabstride-v<version>-x86_64-unknown-linux-musl.tar.gz` |
+| Linux ARM64 | `tabstride-v<version>-aarch64-unknown-linux-musl.tar.gz` |
+
+解压后将 `tabstride` 二进制加入 `PATH`。macOS 上如果 Gatekeeper 拦截二进制，
+先清除隔离属性：
+
+```bash
+xattr -d com.apple.quarantine tabstride
+```
 
 验证二进制：
 
@@ -73,7 +95,18 @@ tabstride --version
 
 #### 2. 安装浏览器扩展
 
-从 [Chrome Web Store](https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi) 安装 TabStride。
+扩展暂未发布到 Chrome 商店。请从
+[最新扩展 release](https://github.com/SeldomQA/TabStride/releases/tag/ext-v0.2.0)
+下载 `tabstride-extension-v<version>-chrome.zip`，然后手动加载（zip 包与
+操作系统无关，Windows、macOS、Linux 通用）：
+
+1. 将压缩包解压到一个固定目录。
+2. 在 Chrome 或 Microsoft Edge 中打开 `chrome://extensions/`。
+3. 开启右上角的**开发者模式**。
+4. 点击**加载已解压的扩展程序**，选择解压后的目录。
+
+以解压方式加载的扩展不会自动更新。每次发布新版本后，请下载新的 zip、
+替换目录内容，并在扩展卡片上点击刷新按钮。
 
 #### 3. 安装 skill
 

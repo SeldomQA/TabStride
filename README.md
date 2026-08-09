@@ -54,7 +54,7 @@ copy this one line and send it to your agent — it will install the CLI and ski
 for you, then walk you through loading the extension:
 
 ```text
-Set up tabstride on this machine by following https://raw.githubusercontent.com/Tencent/TabStride/main/AGENT_INSTALL.md
+Set up tabstride on this machine by following https://raw.githubusercontent.com/SeldomQA/TabStride/main/AGENT_INSTALL.md
 ```
 
 </details>
@@ -64,20 +64,40 @@ Set up tabstride on this machine by following https://raw.githubusercontent.com/
 
 <br>
 
-Install the CLI, then install the extension from the [Chrome Web Store](https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi).
+Install the CLI, then load the browser extension. The extension is not on the
+Chrome Web Store yet — download it from GitHub Releases and load it manually
+(see step 2).
 
 #### 1. Install the `tabstride` CLI
 
-**macOS / Linux** (recommended — installs to `~/.local/bin`):
+**macOS / Linux** (recommended — installs to `~/.local/bin` from GitHub Releases):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Tencent/TabStride/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/SeldomQA/TabStride/main/install.sh | TABSTRIDE_REPO=SeldomQA/TabStride sh
 ```
 
 **Windows** (PowerShell — installs to `~/.local/bin`):
 
 ```powershell
-irm https://raw.githubusercontent.com/Tencent/TabStride/main/install.ps1 | iex
+$env:TABSTRIDE_REPO = "SeldomQA/TabStride"; irm https://raw.githubusercontent.com/SeldomQA/TabStride/main/install.ps1 | iex
+```
+
+**Manual download** — pick the archive for your platform from the
+[latest CLI release](https://github.com/SeldomQA/TabStride/releases/latest):
+
+| Platform | Asset |
+| --- | --- |
+| Windows x64 | `tabstride-v<version>-x86_64-pc-windows-msvc.zip` |
+| macOS Apple Silicon | `tabstride-v<version>-aarch64-apple-darwin.tar.gz` |
+| macOS Intel | `tabstride-v<version>-x86_64-apple-darwin.tar.gz` |
+| Linux x64 | `tabstride-v<version>-x86_64-unknown-linux-musl.tar.gz` |
+| Linux ARM64 | `tabstride-v<version>-aarch64-unknown-linux-musl.tar.gz` |
+
+Unpack the archive and put the `tabstride` binary on your `PATH`. On macOS,
+clear the quarantine flag first if Gatekeeper blocks the binary:
+
+```bash
+xattr -d com.apple.quarantine tabstride
 ```
 
 Verify the binary:
@@ -88,7 +108,20 @@ tabstride --version
 
 #### 2. Install the browser extension
 
-Install TabStride from the [Chrome Web Store](https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi).
+The extension is not published on the Chrome Web Store yet. Download
+`tabstride-extension-v<version>-chrome.zip` from the
+[latest extension release](https://github.com/SeldomQA/TabStride/releases/tag/ext-v0.2.0),
+then load it manually (the zip is platform-independent and works on Windows,
+macOS, and Linux):
+
+1. Unzip the archive to a permanent location.
+2. Open `chrome://extensions/` in Chrome or Microsoft Edge.
+3. Enable **Developer mode** (toggle in the top-right corner).
+4. Click **Load unpacked** and select the unzipped folder.
+
+Because the extension is loaded unpacked, it does not update automatically.
+After each new extension release, download the new zip, replace the folder
+contents, and click the reload button on the TabStride extension card.
 
 #### 3. Install the skill
 
