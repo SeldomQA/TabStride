@@ -75,13 +75,13 @@ export async function getOrCreateInstanceId(
   return fresh;
 }
 
-/** Defaults to enabled when unset or non-boolean. */
+/** Defaults to disabled until the user explicitly enables the connection. */
 export async function getConnectionEnabled(
   storage: StorageBackend = defaultStorage(),
 ): Promise<boolean> {
   const items = await storage.get(CONNECTION_ENABLED_KEY);
   const raw = items[CONNECTION_ENABLED_KEY];
-  return typeof raw === "boolean" ? raw : true;
+  return typeof raw === "boolean" ? raw : false;
 }
 
 export async function setConnectionEnabled(

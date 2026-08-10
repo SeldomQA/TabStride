@@ -34,7 +34,7 @@ const FALLBACK_SNAPSHOT: SnapshotInfo = {
   extensionVersion: "",
   handshake: null,
   lastError: null,
-  connectionEnabled: true,
+  connectionEnabled: false,
 };
 
 /**

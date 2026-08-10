@@ -58,9 +58,9 @@ describe("instance-id", () => {
     expect(store[STORAGE_KEYS.INSTANCE_ID]).toBe(id);
   });
 
-  it("getConnectionEnabled returns true when storage is empty", async () => {
+  it("getConnectionEnabled returns false when storage is empty", async () => {
     const { backend } = fakeStorage();
-    expect(await getConnectionEnabled(backend)).toBe(true);
+    expect(await getConnectionEnabled(backend)).toBe(false);
   });
 
   it("getConnectionEnabled returns persisted boolean values", async () => {
@@ -68,9 +68,9 @@ describe("instance-id", () => {
     expect(await getConnectionEnabled(backend)).toBe(false);
   });
 
-  it("getConnectionEnabled treats non-boolean stored values as enabled", async () => {
+  it("getConnectionEnabled treats non-boolean stored values as disabled", async () => {
     const { backend } = fakeStorage({ [STORAGE_KEYS.CONNECTION_ENABLED]: "false" });
-    expect(await getConnectionEnabled(backend)).toBe(true);
+    expect(await getConnectionEnabled(backend)).toBe(false);
   });
 
   it("setConnectionEnabled persists the value retrievable by getConnectionEnabled", async () => {
